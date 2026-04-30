@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__filesystem__list_allowed_directories",
+      "mcp__filesystem__read_text_file",
+      "mcp__filesystem__list_directory",
+      "PowerShell(& \"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\\\\tests\\\\test_matcher_resolve.py\" --rootdir=\"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\" -q 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\\\\tests\\\\integration\\\\test_auth_flow.py::TestLogin::test_admin_login_success\" --rootdir=\"c:\\\\Users\\\\bomsh\\\\Documents\\\\GitHub\\\\gazprom-diplom\\\\backend\" -q 2>&1)"
+    ]
+  }
+}

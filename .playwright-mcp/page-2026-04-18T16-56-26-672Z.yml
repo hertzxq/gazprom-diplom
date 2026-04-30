@@ -1,0 +1,48 @@
+- generic [ref=e23]:
+  - complementary [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]: G Система закупок
+      - generic [ref=e27]: Поддержка закупочной деятельности
+    - navigation [ref=e28]:
+      - link "Загрузка" [active] [ref=e29] [cursor=pointer]:
+        - /url: /upload
+        - img [ref=e30]
+        - generic [ref=e33]: Загрузка
+      - link "Обработка" [ref=e34] [cursor=pointer]:
+        - /url: /processing
+        - img [ref=e35]
+        - generic [ref=e40]: Обработка
+      - link "Свод СМСП" [ref=e41] [cursor=pointer]:
+        - /url: /task2
+        - img [ref=e42]
+        - generic [ref=e44]: Свод СМСП
+      - link "Поиск" [ref=e45] [cursor=pointer]:
+        - /url: /manufacturers
+        - img [ref=e46]
+        - generic [ref=e49]: Поиск
+      - link "Пользователи" [ref=e50] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e51]
+        - generic [ref=e56]: Пользователи
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - img [ref=e60]
+        - generic [ref=e63]:
+          - generic [ref=e64]: Администратор
+          - generic [ref=e65]: Администратор
+      - generic [ref=e66]:
+        - button [ref=e68] [cursor=pointer]:
+          - img [ref=e69]
+        - button "Выйти" [ref=e72] [cursor=pointer]:
+          - img [ref=e73]
+          - text: Выйти
+  - main [ref=e76]:
+    - generic [ref=e111]:
+      - generic [ref=e112]:
+        - heading "Загрузка документов" [level=1] [ref=e113]
+        - paragraph [ref=e114]: Загрузите файлы позиций, УПД, актов или шаблонов
+      - generic [ref=e116] [cursor=pointer]:
+        - button "Choose File" [ref=e117]
+        - img [ref=e119]
+        - paragraph [ref=e122]: Перетащите файлы сюда или нажмите для выбора
+        - paragraph [ref=e123]: "Поддерживаемые форматы: XLS, XLSX, PDF (до 50 МБ)"

@@ -1,0 +1,70 @@
+- generic [ref=e23]:
+  - complementary [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]: G Система закупок
+      - generic [ref=e27]: Поддержка закупочной деятельности
+    - navigation [ref=e28]:
+      - link "Загрузка" [ref=e29] [cursor=pointer]:
+        - /url: /upload
+        - img [ref=e30]
+        - generic [ref=e33]: Загрузка
+      - link "Обработка" [ref=e34] [cursor=pointer]:
+        - /url: /processing
+        - img [ref=e35]
+        - generic [ref=e40]: Обработка
+      - link "Свод СМСП" [active] [ref=e41] [cursor=pointer]:
+        - /url: /task2
+        - img [ref=e42]
+        - generic [ref=e44]: Свод СМСП
+      - link "Поиск" [ref=e45] [cursor=pointer]:
+        - /url: /manufacturers
+        - img [ref=e46]
+        - generic [ref=e49]: Поиск
+      - link "Пользователи" [ref=e50] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e51]
+        - generic [ref=e56]: Пользователи
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - img [ref=e60]
+        - generic [ref=e63]:
+          - generic [ref=e64]: Администратор
+          - generic [ref=e65]: Администратор
+      - generic [ref=e66]:
+        - button [ref=e68] [cursor=pointer]:
+          - img [ref=e69]
+        - button "Выйти" [ref=e72] [cursor=pointer]:
+          - img [ref=e73]
+          - text: Выйти
+  - main [ref=e76]:
+    - generic [ref=e174]:
+      - generic [ref=e175]:
+        - heading "Свод СМСП (Задача 2)" [level=1] [ref=e176]
+        - paragraph [ref=e177]: Реестр платежей + реестр договоров → первичный свод → 3-вкладочный итоговый свод
+      - generic [ref=e178]:
+        - generic [ref=e179]:
+          - generic [ref=e180]: "1"
+          - text: Загрузка и выбор
+        - generic [ref=e181]:
+          - generic [ref=e182]: "2"
+          - text: Первичный свод
+        - generic [ref=e183]:
+          - generic [ref=e184]: "3"
+          - text: Итоговый свод
+      - generic [ref=e185]:
+        - generic [ref=e186]:
+          - heading "Шаг 1. Выбор реестров" [level=2] [ref=e187]
+          - button "Построить первичный свод" [ref=e188] [cursor=pointer]:
+            - img [ref=e189]
+            - text: Построить первичный свод
+        - generic [ref=e191]:
+          - generic [ref=e192]:
+            - generic [ref=e193]: Реестр платежей
+            - combobox [ref=e194]:
+              - option "— Выберите файл —"
+              - option "payment_registry_synthetic.xlsx" [selected]
+          - generic [ref=e195]:
+            - generic [ref=e196]: Реестр договоров
+            - combobox [ref=e197]:
+              - option "— Выберите файл —"
+              - option "contract_registry_synthetic.xlsx" [selected]

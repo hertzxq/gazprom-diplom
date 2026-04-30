@@ -1,0 +1,189 @@
+- generic [ref=e23]:
+  - complementary [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]: G Система закупок
+      - generic [ref=e27]: Поддержка закупочной деятельности
+    - navigation [ref=e28]:
+      - link "Загрузка" [ref=e29] [cursor=pointer]:
+        - /url: /upload
+        - img [ref=e30]
+        - generic [ref=e33]: Загрузка
+      - link "Обработка" [ref=e34] [cursor=pointer]:
+        - /url: /processing
+        - img [ref=e35]
+        - generic [ref=e40]: Обработка
+      - link "Свод СМСП" [ref=e41] [cursor=pointer]:
+        - /url: /task2
+        - img [ref=e42]
+        - generic [ref=e44]: Свод СМСП
+      - link "Поиск" [ref=e45] [cursor=pointer]:
+        - /url: /manufacturers
+        - img [ref=e46]
+        - generic [ref=e49]: Поиск
+      - link "Пользователи" [active] [ref=e50] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e51]
+        - generic [ref=e56]: Пользователи
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - img [ref=e60]
+        - generic [ref=e63]:
+          - generic [ref=e64]: Администратор
+          - generic [ref=e65]: Администратор
+      - generic [ref=e66]:
+        - button "2" [ref=e749] [cursor=pointer]:
+          - img [ref=e69]
+          - generic [ref=e462]: "2"
+        - button "Выйти" [ref=e72] [cursor=pointer]:
+          - img [ref=e73]
+          - text: Выйти
+  - main [ref=e76]:
+    - generic [ref=e750]:
+      - generic [ref=e751]:
+        - heading "Управление пользователями" [level=1] [ref=e752]
+        - paragraph [ref=e753]: Создание, роли и блокировка учётных записей
+      - generic [ref=e754]:
+        - generic [ref=e755]:
+          - heading "Пользователи" [level=2] [ref=e756]:
+            - img [ref=e757]
+            - text: Пользователи
+          - button "Добавить" [ref=e762] [cursor=pointer]:
+            - img [ref=e763]
+            - text: Добавить
+        - table [ref=e767]:
+          - rowgroup [ref=e768]:
+            - row "Пользователь Email Роль Статус Создан Действия" [ref=e769]:
+              - columnheader "Пользователь" [ref=e770]
+              - columnheader "Email" [ref=e771]
+              - columnheader "Роль" [ref=e772]
+              - columnheader "Статус" [ref=e773]
+              - columnheader "Создан" [ref=e774]
+              - columnheader "Действия" [ref=e775]
+          - rowgroup [ref=e776]:
+            - row "Иванов Илюха @user user@gmail.com Пользователь Активен 27.03.2026" [ref=e777]:
+              - cell "Иванов Илюха @user" [ref=e778]:
+                - generic [ref=e779]:
+                  - text: Иванов Илюха
+                  - generic [ref=e780]: "@user"
+              - cell "user@gmail.com" [ref=e781]
+              - cell "Пользователь" [ref=e782]:
+                - combobox [ref=e783]:
+                  - option "Администратор"
+                  - option "Пользователь" [selected]
+              - cell "Активен" [ref=e784]:
+                - button "Активен" [ref=e785] [cursor=pointer]:
+                  - img [ref=e786]
+                  - text: Активен
+              - cell "27.03.2026" [ref=e788]
+              - cell [ref=e789]:
+                - button "Удалить" [ref=e790] [cursor=pointer]:
+                  - img [ref=e791]
+            - row "Администратор @admin admin@gazprom.local Администратор Активен 23.03.2026" [ref=e794]:
+              - cell "Администратор @admin" [ref=e795]:
+                - generic [ref=e796]:
+                  - text: Администратор
+                  - generic [ref=e797]: "@admin"
+              - cell "admin@gazprom.local" [ref=e798]
+              - cell "Администратор" [ref=e799]:
+                - combobox "Нельзя изменить свою роль" [disabled] [ref=e800]:
+                  - option "Администратор" [selected]
+                  - option "Пользователь"
+              - cell "Активен" [ref=e801]:
+                - button "Активен" [disabled] [ref=e802]:
+                  - img [ref=e803]
+                  - text: Активен
+              - cell "23.03.2026" [ref=e805]
+              - cell [ref=e806]
+      - generic [ref=e807]:
+        - generic [ref=e808]:
+          - heading "Правила исключений СМСП" [level=2] [ref=e809]:
+            - img [ref=e810]
+            - text: Правила исключений СМСП
+          - generic [ref=e812]:
+            - button "Добавить" [ref=e813] [cursor=pointer]:
+              - img [ref=e814]
+              - text: Добавить
+            - button "Сохранить" [ref=e815] [cursor=pointer]:
+              - img [ref=e816]
+              - text: Сохранить
+        - paragraph [ref=e820]: Сопоставляет формулировку пункта из столбца «Исключение из СМСП» реестра договоров с короткой меткой категории. Первое сработавшее правило выигрывает — правила упорядочиваются по «Порядок». Ключевые слова — через запятую; ищется подстрока в нормализованном тексте.
+        - table [ref=e822]:
+          - rowgroup [ref=e823]:
+            - row "Порядок Категория Ключевые слова (через запятую) Пункт (а-я) Активно" [ref=e824]:
+              - columnheader "Порядок" [ref=e825]
+              - columnheader "Категория" [ref=e826]
+              - columnheader "Ключевые слова (через запятую)" [ref=e827]
+              - columnheader "Пункт (а-я)" [ref=e828]
+              - columnheader "Активно" [ref=e829]
+              - columnheader [ref=e830]
+          - rowgroup [ref=e831]:
+            - row "10 авиа воздушн, авиац, авиа р" [ref=e832]:
+              - cell "10" [ref=e833]:
+                - spinbutton [ref=e834]: "10"
+              - cell "авиа" [ref=e835]:
+                - textbox [ref=e836]: авиа
+              - cell "воздушн, авиац, авиа" [ref=e837]:
+                - textbox "страхов, банковск" [ref=e838]: воздушн, авиац, авиа
+              - cell "р" [ref=e839]:
+                - textbox "р" [ref=e840]
+              - cell [ref=e841]:
+                - checkbox [checked] [ref=e842]
+              - cell [ref=e843]:
+                - button "Удалить" [ref=e844] [cursor=pointer]:
+                  - img [ref=e845]
+            - row "20 страх страхов, финансов, банковск, лизинг д" [ref=e848]:
+              - cell "20" [ref=e849]:
+                - spinbutton [ref=e850]: "20"
+              - cell "страх" [ref=e851]:
+                - textbox [ref=e852]: страх
+              - cell "страхов, финансов, банковск, лизинг" [ref=e853]:
+                - textbox "страхов, банковск" [ref=e854]: страхов, финансов, банковск, лизинг
+              - cell "д" [ref=e855]:
+                - textbox "р" [ref=e856]: д
+              - cell [ref=e857]:
+                - checkbox [checked] [ref=e858]
+              - cell [ref=e859]:
+                - button "Удалить" [ref=e860] [cursor=pointer]:
+                  - img [ref=e861]
+            - row "30 образов образоват, обучен ц" [ref=e864]:
+              - cell "30" [ref=e865]:
+                - spinbutton [ref=e866]: "30"
+              - cell "образов" [ref=e867]:
+                - textbox [ref=e868]: образов
+              - cell "образоват, обучен" [ref=e869]:
+                - textbox "страхов, банковск" [ref=e870]: образоват, обучен
+              - cell "ц" [ref=e871]:
+                - textbox "р" [ref=e872]: ц
+              - cell [ref=e873]:
+                - checkbox [checked] [ref=e874]
+              - cell [ref=e875]:
+                - button "Удалить" [ref=e876] [cursor=pointer]:
+                  - img [ref=e877]
+            - row "40 аренда аренд, недвижим л" [ref=e880]:
+              - cell "40" [ref=e881]:
+                - spinbutton [ref=e882]: "40"
+              - cell "аренда" [ref=e883]:
+                - textbox [ref=e884]: аренда
+              - cell "аренд, недвижим" [ref=e885]:
+                - textbox "страхов, банковск" [ref=e886]: аренд, недвижим
+              - cell "л" [ref=e887]:
+                - textbox "р" [ref=e888]: л
+              - cell [ref=e889]:
+                - checkbox [checked] [ref=e890]
+              - cell [ref=e891]:
+                - button "Удалить" [ref=e892] [cursor=pointer]:
+                  - img [ref=e893]
+            - row "50 почта почтов, связ" [ref=e896]:
+              - cell "50" [ref=e897]:
+                - spinbutton [ref=e898]: "50"
+              - cell "почта" [ref=e899]:
+                - textbox [ref=e900]: почта
+              - cell "почтов, связ" [ref=e901]:
+                - textbox "страхов, банковск" [ref=e902]: почтов, связ
+              - cell [ref=e903]:
+                - textbox "р" [ref=e904]
+              - cell [ref=e905]:
+                - checkbox [checked] [ref=e906]
+              - cell [ref=e907]:
+                - button "Удалить" [ref=e908] [cursor=pointer]:
+                  - img [ref=e909]
