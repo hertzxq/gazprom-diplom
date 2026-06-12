@@ -1,0 +1,38 @@
+@startuml fig_2_1_usecase
+' Рисунок 2.1 — Диаграмма вариантов использования системы
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 160
+skinparam defaultFontSize 13
+left to right direction
+
+actor "Сотрудник\nзакупочного\nподразделения" as emp
+actor "Администратор" as adm
+
+rectangle "Система поддержки закупочной деятельности" {
+  usecase "Вход в систему\n(JWT-аутентификация)" as UC0
+  usecase "Загрузка входных\nдокументов (XLSX/XLS/PDF)" as UC1
+  usecase "Автозаполнение\nXLS-формы ЕИС" as UC2
+  usecase "Скачивание\nзаполненной формы" as UC3
+  usecase "Загрузка реестров,\nрасчёт доли СМСП" as UC4
+  usecase "Поиск производителей\n(LLM)" as UC5
+  usecase "Просмотр аналитики\nи уведомлений" as UC6
+  usecase "Управление\nпользователями" as UC7
+  usecase "Управление\nправилами СМСП" as UC8
+}
+
+emp --> UC0
+emp --> UC1
+emp --> UC2
+emp --> UC3
+emp --> UC4
+emp --> UC5
+emp --> UC6
+adm --> UC0
+adm --> UC7
+adm --> UC8
+
+UC2 ..> UC1 : <<include>>
+UC3 ..> UC2 : <<include>>
+UC4 ..> UC1 : <<include>>
+@enduml

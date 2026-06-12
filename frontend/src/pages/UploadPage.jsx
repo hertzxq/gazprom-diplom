@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { useNavigate } from 'react-router-dom';
 import { documentsApi } from '../services/api';
 import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -14,23 +13,55 @@ const FILE_TYPES = [
   { value: 'contract_registry', label: 'Реестр договоров' },
 ];
 
+// Эвристика типа по имени файла — чтобы не выставлять каждый селект вручную.
+// Порядок важен: более специфичные шаблоны проверяются раньше.
+const TYPE_PATTERNS = [
+  { re: /(реестр[\s_-]*платеж|payment)/i, type: 'payment_registry' },
+  { re: /(реестр[\s_-]*договор|contract)/i, type: 'contract_registry' },
+  { re: /(шаблон|template)/i, type: 'template' },
+  { re: /(упд|upd|счет[\s_-]*фактур)/i, type: 'upd' },
+  { re: /(^|[\s_-])(акт|act)([\s_-]|\.|$)/i, type: 'act' },
+  { re: /(позици|прайс|price)/i, type: 'positions' },
+];
+
+const detectFileType = (filename) => {
+  for (const { re, type } of TYPE_PATTERNS) {
+    if (re.test(filename)) return type;
+  }
+  return 'positions';
+};
+
+const fileWord = (n) => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'файл';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'файла';
+  return 'файлов';
+};
+
 export default function UploadPage() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const navigate = useNavigate();
 
   const onDrop = useCallback((acceptedFiles) => {
     const newFiles = acceptedFiles.map((file) => ({
       file,
-      fileType: 'positions',
+      fileType: detectFileType(file.name),
       status: 'pending',
       id: Math.random().toString(36).slice(2),
     }));
     setFiles((prev) => [...prev, ...newFiles]);
   }, []);
 
+  const onDropRejected = useCallback((rejections) => {
+    rejections.forEach(({ file }) => {
+      toast.error(`«${file.name}» не подходит: только XLS, XLSX или PDF до 50 МБ`);
+    });
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls'],
@@ -57,6 +88,7 @@ export default function UploadPage() {
 
     setUploading(true);
     let successCount = 0;
+    let errorCount = 0;
 
     for (const item of files) {
       if (item.status === 'uploaded') continue;
@@ -73,10 +105,11 @@ export default function UploadPage() {
         );
         successCount++;
       } catch (err) {
+        errorCount++;
         setFiles((prev) =>
           prev.map((f) =>
             f.id === item.id
-              ? { ...f, status: 'error', error: err.response?.data?.detail || 'Ошибка' }
+              ? { ...f, status: 'error', error: err.response?.data?.detail || 'Ошибка загрузки' }
               : f
           )
         );
@@ -86,7 +119,10 @@ export default function UploadPage() {
     setUploading(false);
 
     if (successCount > 0) {
-      toast.success(`Загружено ${successCount} файл(ов)`);
+      toast.success(`Загружено ${successCount} ${fileWord(successCount)}`);
+    }
+    if (errorCount > 0) {
+      toast.error('Часть файлов не загрузилась — причина указана под именем файла');
     }
   };
 
@@ -161,6 +197,11 @@ export default function UploadPage() {
               <div className="file-info">
                 <div className="file-name">{item.file.name}</div>
                 <div className="file-meta">{formatSize(item.file.size)}</div>
+                {item.status === 'error' && item.error && (
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)', marginTop: '2px' }}>
+                    {item.error}
+                  </div>
+                )}
               </div>
               <select
                 className="form-select"

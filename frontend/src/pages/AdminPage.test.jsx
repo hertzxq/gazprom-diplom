@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AdminPage from './AdminPage';
@@ -140,8 +140,8 @@ describe('AdminPage', () => {
     // Кнопка пользователей помечена id="add-user-btn".
     await user.click(document.getElementById('add-user-btn'));
 
-    await user.type(screen.getByPlaceholderText('username'), 'new_user');
-    await user.type(screen.getByPlaceholderText('user@example.com'), 'new@test.com');
+    await user.type(screen.getByPlaceholderText('ivanov'), 'new_user');
+    await user.type(screen.getByPlaceholderText('ivanov@gazprom-expo.ru'), 'new@test.com');
     await user.type(screen.getByPlaceholderText('••••••'), 'pass123');
 
     await user.click(screen.getByRole('button', { name: /Создать/i }));

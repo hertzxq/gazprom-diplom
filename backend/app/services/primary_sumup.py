@@ -95,6 +95,10 @@ def build_primary_sumup(
     payments: list[PaymentRow],
     contracts: list[ContractRow],
     rules: list[ClassifierRule],
+    *,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    min_amount: Optional[float] = None,
 ) -> list[SumupRow]:
     """
     Группирует платежи по договорам и подтягивает реквизиты.
@@ -102,11 +106,20 @@ def build_primary_sumup(
     Ключ группировки (и lookup'а в реестр договоров):
         (normalize(contract_number), contract_date, normalize(contragent))
     При пустом / б/н номере — ключ строится только по (дата, контрагент).
+
+    Фильтры (по ТЗ Tech_doc.md, Block 1, item 2):
+    - date_from / date_to — период расчёта; платежи вне периода игнорируются.
+      Платежи без даты пропускаются если задан хотя бы один из date_from/date_to.
+    - min_amount — пороговое значение суммы платежей по договору; группы с
+      payment_sum < min_amount исключаются после агрегации.
     """
     contract_index = _index_contracts(contracts)
 
+    # Шаг 1: предварительная фильтрация по периоду.
+    payments_in_period = _filter_payments_by_period(payments, date_from, date_to)
+
     groups: dict[tuple, list[PaymentRow]] = {}
-    for p in payments:
+    for p in payments_in_period:
         key = _group_key(p.contract_number, p.contract_date, p.contragent)
         groups.setdefault(key, []).append(p)
 
@@ -167,9 +180,35 @@ def build_primary_sumup(
             has_contract_match=contract is not None,
         ))
 
+    # Шаг 2: пороговый фильтр по сумме платежей (после агрегации).
+    if min_amount is not None and min_amount > 0:
+        rows = [r for r in rows if r.payment_sum >= min_amount]
+
     # Сортируем как в примере: по дате, затем по контрагенту.
     rows.sort(key=lambda r: (r.date or date.min, r.contragent.lower()))
     return rows
+
+
+def _filter_payments_by_period(
+    payments: list[PaymentRow],
+    date_from: Optional[date],
+    date_to: Optional[date],
+) -> list[PaymentRow]:
+    """Оставляет только платежи, чья дата попадает в [date_from, date_to]."""
+    if date_from is None and date_to is None:
+        return payments
+
+    result: list[PaymentRow] = []
+    for p in payments:
+        # Платёж без даты не получится отфильтровать — пропускаем при активном фильтре.
+        if p.payment_date is None:
+            continue
+        if date_from is not None and p.payment_date < date_from:
+            continue
+        if date_to is not None and p.payment_date > date_to:
+            continue
+        result.append(p)
+    return result
 
 
 def generate_primary_sumup_xlsx(rows: list[SumupRow], task_id: str) -> str:

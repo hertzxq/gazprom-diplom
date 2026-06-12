@@ -1,4 +1,13 @@
-"""API-эндпоинты для поиска производителей."""
+"""API-эндпоинты для поиска производителей.
+
+Поиск выполняется LLM на CPU и занимает минуты, поэтому он вынесен из
+HTTP-запроса в фоновую asyncio-задачу: POST сразу возвращает task_id,
+фронт опрашивает GET /tasks/{id} и может отменить поиск POST /tasks/{id}/cancel.
+Так обновление страницы или уход с неё не теряют результат, а отмена
+реально обрывает соединение с Ollama (генерация прекращается).
+"""
+import asyncio
+import os
 import uuid
 import tempfile
 from pathlib import Path
@@ -6,18 +15,19 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
-from app.database import get_db
+from app.database import get_db, async_session
 from app.models.user import User
 from app.models.document import ProcessingTask, DocumentStatus
 from app.schemas import (
     ManufacturerSearchRequest,
-    ManufacturerSearchResponse,
     ManufacturerInfoRequest,
-    ManufacturerInfoResponse,
     ManufacturerResult,
     ManufacturerDocResult,
     ManufacturerExportRequest,
+    ManufacturerTaskStartResponse,
+    ManufacturerTaskStatusResponse,
 )
 from app.services.manufacturer_search import (
     search_manufacturers_by_specs,
@@ -27,35 +37,42 @@ from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/manufacturers", tags=["Поиск производителей"])
 
+# Живые поиски текущего процесса: str(task_id) → asyncio.Task.
+# Бэкенд работает одним процессом, поэтому словаря в памяти достаточно.
+_RUNNING: dict[str, asyncio.Task] = {}
 
-@router.post("/search-by-specs", response_model=ManufacturerSearchResponse)
-async def search_by_specs(
-    request: ManufacturerSearchRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Поиск производителей по характеристикам товара."""
-    # Создать задачу обработки для истории
-    task = ProcessingTask(
-        task_type="manufacturer_search_specs",
-        parameters={
-            "product_name": request.product_name,
-            "characteristics": [c.model_dump() for c in request.characteristics],
-            "sources": request.sources,
-        },
-        created_by=current_user.id,
-        status=DocumentStatus.PROCESSING,
-    )
-    db.add(task)
-    await db.flush()
+CANCELLED_MESSAGE = "Поиск отменён пользователем"
 
+
+async def _finalize_task(task_id: uuid.UUID, status: DocumentStatus, matching_data: dict) -> None:
+    """
+    Записывает итог фоновой задачи отдельной сессией — сессия исходного
+    HTTP-запроса к этому моменту уже закрыта. PROCESSING-guard защищает
+    от гонки «отмена против позднего результата».
+    """
+    async with async_session() as session:
+        task = await session.get(ProcessingTask, task_id)
+        if task is not None and task.status == DocumentStatus.PROCESSING:
+            task.status = status
+            task.matching_data = matching_data
+            await session.commit()
+
+
+def _start_background_search(task_id: uuid.UUID, coro) -> None:
+    """Запускает поиск фоном и регистрирует его для статуса/отмены."""
+    bg = asyncio.create_task(coro)
+    key = str(task_id)
+    _RUNNING[key] = bg
+    bg.add_done_callback(lambda _t, _k=key: _RUNNING.pop(_k, None))
+
+
+async def _run_specs_search(task_id: uuid.UUID, request: ManufacturerSearchRequest) -> None:
     try:
         raw_results = await search_manufacturers_by_specs(
             product_name=request.product_name,
             characteristics=[c.model_dump() for c in request.characteristics],
             sources=request.sources,
         )
-
         results = [
             ManufacturerResult(
                 name=r.get("name", "Неизвестно"),
@@ -65,53 +82,30 @@ async def search_by_specs(
                 certificates=r.get("certificates"),
                 products=r.get("products"),
                 source=r.get("source"),
-            )
+            ).model_dump()
             for r in raw_results
         ]
-
-        task.status = DocumentStatus.PROCESSED
-        task.matching_data = {
+        await _finalize_task(task_id, DocumentStatus.PROCESSED, {
             "results_count": len(results),
-            "results": [r.model_dump() for r in results],
-        }
-
-        return ManufacturerSearchResponse(
-            task_id=task.id,
-            results=results,
-            message=f"Найдено производителей: {len(results)}",
-        )
-
+            "results": results,
+        })
+    except asyncio.CancelledError:
+        # shield: запись об отмене должна дойти до БД, даже когда задачу отменяют
+        await asyncio.shield(_finalize_task(task_id, DocumentStatus.ERROR, {
+            "cancelled": True,
+            "error": CANCELLED_MESSAGE,
+        }))
+        raise
     except Exception as e:
-        task.status = DocumentStatus.ERROR
-        task.matching_data = {"error": str(e)}
-        raise HTTPException(status_code=500, detail=f"Ошибка поиска: {str(e)}")
+        await _finalize_task(task_id, DocumentStatus.ERROR, {"error": str(e)})
 
 
-@router.post("/search-by-name", response_model=ManufacturerInfoResponse)
-async def search_by_name(
-    request: ManufacturerInfoRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Поиск производителя и документации по наименованию товара."""
-    task = ProcessingTask(
-        task_type="manufacturer_search_name",
-        parameters={
-            "product_name": request.product_name,
-            "sources": request.sources,
-        },
-        created_by=current_user.id,
-        status=DocumentStatus.PROCESSING,
-    )
-    db.add(task)
-    await db.flush()
-
+async def _run_name_search(task_id: uuid.UUID, request: ManufacturerInfoRequest) -> None:
     try:
         raw = await search_manufacturer_info(
             product_name=request.product_name,
             sources=request.sources,
         )
-
         manufacturers = [
             ManufacturerResult(
                 name=m.get("name", "Неизвестно"),
@@ -119,39 +113,145 @@ async def search_by_name(
                 website=m.get("website"),
                 contacts=m.get("contacts"),
                 is_primary=m.get("is_primary", False),
-            )
+            ).model_dump()
             for m in raw.get("manufacturers", [])
         ]
-
         documentation = [
             ManufacturerDocResult(
                 title=d.get("title", "Без названия"),
                 doc_type=d.get("doc_type"),
                 source_url=d.get("source_url"),
                 description=d.get("description"),
-            )
+            ).model_dump()
             for d in raw.get("documentation", [])
         ]
-
-        task.status = DocumentStatus.PROCESSED
-        task.matching_data = {
+        await _finalize_task(task_id, DocumentStatus.PROCESSED, {
             "manufacturers_count": len(manufacturers),
             "documentation_count": len(documentation),
+            "manufacturers": manufacturers,
+            "documentation": documentation,
             "summary": raw.get("summary", ""),
-        }
-
-        return ManufacturerInfoResponse(
-            task_id=task.id,
-            manufacturers=manufacturers,
-            documentation=documentation,
-            summary=raw.get("summary", ""),
-            message=f"Найдено: {len(manufacturers)} производителей, {len(documentation)} документов",
-        )
-
+        })
+    except asyncio.CancelledError:
+        await asyncio.shield(_finalize_task(task_id, DocumentStatus.ERROR, {
+            "cancelled": True,
+            "error": CANCELLED_MESSAGE,
+        }))
+        raise
     except Exception as e:
-        task.status = DocumentStatus.ERROR
-        task.matching_data = {"error": str(e)}
-        raise HTTPException(status_code=500, detail=f"Ошибка поиска: {str(e)}")
+        await _finalize_task(task_id, DocumentStatus.ERROR, {"error": str(e)})
+
+
+async def _create_search_task(db: AsyncSession, user: User, task_type: str, parameters: dict) -> ProcessingTask:
+    task = ProcessingTask(
+        task_type=task_type,
+        parameters=parameters,
+        created_by=user.id,
+        status=DocumentStatus.PROCESSING,
+    )
+    db.add(task)
+    # Коммитим сразу: строка должна быть видна опросу /tasks/{id}
+    # и фоновой задаче (другие сессии) до завершения этого запроса.
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+@router.post("/search-by-specs", response_model=ManufacturerTaskStartResponse)
+async def search_by_specs(
+    request: ManufacturerSearchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Запускает фоновый поиск производителей по характеристикам товара."""
+    task = await _create_search_task(
+        db, current_user, "manufacturer_search_specs",
+        {
+            "product_name": request.product_name,
+            "characteristics": [c.model_dump() for c in request.characteristics],
+            "sources": request.sources,
+        },
+    )
+    _start_background_search(task.id, _run_specs_search(task.id, request))
+    return ManufacturerTaskStartResponse(
+        task_id=task.id,
+        message="Поиск запущен — на CPU это занимает 1–3 минуты",
+    )
+
+
+@router.post("/search-by-name", response_model=ManufacturerTaskStartResponse)
+async def search_by_name(
+    request: ManufacturerInfoRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Запускает фоновый поиск производителя и документации по наименованию."""
+    task = await _create_search_task(
+        db, current_user, "manufacturer_search_name",
+        {
+            "product_name": request.product_name,
+            "sources": request.sources,
+        },
+    )
+    _start_background_search(task.id, _run_name_search(task.id, request))
+    return ManufacturerTaskStartResponse(
+        task_id=task.id,
+        message="Поиск запущен — на CPU это занимает 1–3 минуты",
+    )
+
+
+@router.get("/tasks/{task_id}", response_model=ManufacturerTaskStatusResponse)
+async def get_search_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Статус и результат фонового поиска (для опроса с фронта)."""
+    task = await db.get(ProcessingTask, task_id)
+    if task is None or not (task.task_type or "").startswith("manufacturer_search"):
+        raise HTTPException(status_code=404, detail="Задача поиска не найдена")
+
+    # PROCESSING в БД при отсутствии живой задачи в процессе = бэкенд
+    # перезапускался. Перечитываем строку (защита от гонки с финализацией)
+    # и помечаем задачу потерянной.
+    if task.status == DocumentStatus.PROCESSING and str(task_id) not in _RUNNING:
+        await db.refresh(task)
+        if task.status == DocumentStatus.PROCESSING:
+            task.status = DocumentStatus.ERROR
+            task.matching_data = {"error": "Поиск прерван перезапуском сервера — запустите заново"}
+            await db.commit()
+
+    data = task.matching_data or {}
+    return ManufacturerTaskStatusResponse(
+        task_id=task.id,
+        task_type=task.task_type,
+        status=task.status.value,
+        cancelled=bool(data.get("cancelled")),
+        error=data.get("error"),
+        results=data.get("results"),
+        manufacturers=data.get("manufacturers"),
+        documentation=data.get("documentation"),
+        summary=data.get("summary"),
+    )
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=ManufacturerTaskStartResponse)
+async def cancel_search_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отменяет выполняющийся поиск. Запись в БД делает сам отменяемый таск."""
+    task = await db.get(ProcessingTask, task_id)
+    if task is None or not (task.task_type or "").startswith("manufacturer_search"):
+        raise HTTPException(status_code=404, detail="Задача поиска не найдена")
+
+    bg = _RUNNING.get(str(task_id))
+    if bg is None or bg.done():
+        raise HTTPException(status_code=409, detail="Поиск уже завершён")
+
+    bg.cancel()
+    return ManufacturerTaskStartResponse(task_id=task_id, message=CANCELLED_MESSAGE)
 
 
 @router.post("/export")
@@ -224,5 +324,7 @@ async def export_results(
         path=tmp.name,
         filename=f"Производители_{product_slug}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        # Файл одноразовый: удаляем после отдачи, чтобы не копить мусор в temp.
+        background=BackgroundTask(os.unlink, tmp.name),
     )
 

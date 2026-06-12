@@ -1,0 +1,19 @@
+@startuml fig_2_3_c4_container
+' Рисунок 2.3 — Диаграмма контейнеров (C4 Level 2)
+!include <C4/C4_Container>
+skinparam dpi 160
+
+Person(emp, "Пользователь", "Сотрудник закупочного подразделения / администратор")
+
+System_Boundary(spz, "Система поддержки закупочной деятельности") {
+  Container(spa, "SPA-приложение", "React 18, Vite, React Router 6", "Веб-интерфейс: загрузка документов, результаты обработки, аналитика, админ-панель")
+  Container(api, "API-сервер", "Python 3.12, FastAPI", "REST API и бизнес-логика: парсинг файлов, WSM-матчинг, генерация XLS, классификация и расчёт СМСП")
+  ContainerDb(db, "База данных", "PostgreSQL 16", "Пользователи, документы, задачи обработки, уведомления, правила СМСП")
+  Container(llm, "LLM-сервер", "Ollama, Mistral 7B Instruct (Q4_K_M)", "Верификация неоднозначных сопоставлений, поиск производителей")
+}
+
+Rel(emp, spa, "Использует", "HTTPS, браузер")
+Rel(spa, api, "Вызывает REST API", "JSON/HTTPS, JWT")
+Rel(api, db, "Читает и записывает", "SQL, asyncpg")
+Rel(api, llm, "Отправляет промпты", "HTTP, Ollama API")
+@enduml

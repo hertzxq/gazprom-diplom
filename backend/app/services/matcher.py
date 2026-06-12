@@ -17,10 +17,14 @@ from app.config import settings
 from app.schemas import MatchResult
 from app.services.file_parser import ParsedDocument
 
+# Ключи — в нормализованном виде (_normalize_text: lowercase, ё→е, спецсимволы
+# заменяются пробелом), поэтому «x-trail» здесь записан как «x trail».
 CATEGORY_KEYWORDS = {
-    "седан": ("седан", "solaris", "rio", "logan", "polo", "camry", "corolla", "focus"),
-    "джип": ("джип", "suv", "кроссовер", "внедорож", "rav4", "prado", "x5", "x-trail"),
-    "микроавтобус": ("микроавтобус", "минивэн", "minibus", "автобус", "sprinter", "transit", "starex"),
+    "седан": ("седан", "solaris", "rio", "logan", "polo", "camry", "corolla", "focus", "octavia"),
+    "джип": ("джип", "suv", "кроссовер", "внедорож", "rav4", "prado", "x5", "x trail",
+             "sportage", "outlander", "santa fe"),
+    "микроавтобус": ("микроавтобус", "минивэн", "minibus", "автобус", "sprinter", "transit",
+                     "starex", "crafter", "boxer"),
 }
 
 SERVICE_KEYWORDS = (
@@ -34,6 +38,9 @@ SERVICE_KEYWORDS = (
     "картридж",
     "замен",
     "обслужив",
+    "шиномонтаж",
+    "балансировк",
+    "антикор",
 )
 
 
@@ -41,22 +48,89 @@ async def match_positions(
     positions_document: ParsedDocument,
     source_document: ParsedDocument,
     source_file_type: str | None = None,
+    scenario: str | None = None,
+    use_llm: bool | None = None,
 ) -> list[MatchResult]:
     """
     Сопоставляет строки из УПД/Акта с позициями прайс-листа.
+
+    Аргумент `scenario` (опциональный) задаёт явный сценарий обработки:
+    - "d_lux"               — логика Д-люкс (скидка 15%, коэффициент 1.5,
+                               категории авто, разбиение строк).
+    - "leader_smi"|"veneta" — стандартная логика УПД (цена = total/quantity).
+    - None / ""             — автоопределение по `source_file_type`.
+
+    Если scenario явно противоречит source_file_type (например,
+    `d_lux` + `upd` или `leader_smi` + `act`) — обработка идёт по сценарию,
+    но все строки результата помечаются `needs_review=True` с пометкой
+    «Сценарий не соответствует типу файла» в highlight_reason.
+
+    `use_llm` управляет LLM-верификацией спорных позиций (зона неуверенности
+    fuzzy-скоринга): None — по settings.LLM_MATCHER_ENABLED. На CPU каждый
+    вызов LLM может ждать полный таймаут, поэтому фронт передаёт флаг явно.
     """
     positions_lookup = _prepare_positions(positions_document.rows)
     if not positions_lookup:
         return []
 
-    if source_file_type == "act":
-        return await _match_act_rows(positions_lookup, source_document.rows)
-    return await _match_standard_rows(positions_lookup, source_document.rows)
+    if use_llm is None:
+        use_llm = settings.LLM_MATCHER_ENABLED
+
+    use_act_logic, mismatch = _resolve_scenario(scenario, source_file_type)
+
+    if use_act_logic:
+        results = await _match_act_rows(positions_lookup, source_document.rows, use_llm=use_llm)
+    else:
+        results = await _match_standard_rows(positions_lookup, source_document.rows, use_llm=use_llm)
+
+    if mismatch:
+        results = _mark_scenario_mismatch(results)
+
+    return results
+
+
+_SCENARIO_MISMATCH_REASON = "Сценарий не соответствует типу файла"
+
+
+def _resolve_scenario(
+    scenario: str | None, source_file_type: str | None
+) -> tuple[bool, bool]:
+    """
+    Возвращает (использовать_логику_акта, есть_несоответствие).
+
+    «Использовать логику акта» = True для сценария d_lux ИЛИ для file_type=act
+    при пустом сценарии. Несоответствие = True если выбранный сценарий
+    несовместим с типом файла.
+    """
+    normalized = (scenario or "").strip().lower()
+    is_act_file = source_file_type == "act"
+
+    if normalized == "d_lux":
+        return True, not is_act_file
+    if normalized in {"leader_smi", "veneta"}:
+        return False, is_act_file
+    # «Автоопределение» / неизвестный сценарий — по типу файла
+    return is_act_file, False
+
+
+def _mark_scenario_mismatch(results: list[MatchResult]) -> list[MatchResult]:
+    """Помечает все строки как требующие проверки из-за несоответствия сценария."""
+    marked: list[MatchResult] = []
+    for r in results:
+        reason = r.highlight_reason
+        combined = (
+            f"{reason}; {_SCENARIO_MISMATCH_REASON}" if reason else _SCENARIO_MISMATCH_REASON
+        )
+        marked.append(
+            r.model_copy(update={"needs_review": True, "highlight_reason": combined})
+        )
+    return marked
 
 
 async def _match_standard_rows(
     positions_lookup: list[dict[str, Any]],
     source_rows: list[dict[str, Any]],
+    use_llm: bool = True,
 ) -> list[MatchResult]:
     results: list[MatchResult] = []
 
@@ -66,7 +140,9 @@ async def _match_standard_rows(
             continue
 
         category = _detect_category(_row_to_text(source_row))
-        best_match, needs_review = await _resolve_match(item_name, positions_lookup, category)
+        best_match, needs_review = await _resolve_match(
+            item_name, positions_lookup, category, use_llm=use_llm
+        )
 
         quantity = _extract_numeric(source_row, ["количество", "кол-во", "кол.", "объем"])
         total = _extract_numeric(source_row, ["сумма", "стоимость", "всего", "итого"])
@@ -94,6 +170,7 @@ async def _match_standard_rows(
 async def _match_act_rows(
     positions_lookup: list[dict[str, Any]],
     source_rows: list[dict[str, Any]],
+    use_llm: bool = True,
 ) -> list[MatchResult]:
     """
     Сопоставление строк акта (Д-люкс).
@@ -136,7 +213,9 @@ async def _match_act_rows(
             inherited_used = False
 
         for service_name in service_names:
-            best_match, needs_review = await _resolve_match(service_name, positions_lookup, category)
+            best_match, needs_review = await _resolve_match(
+                service_name, positions_lookup, category, use_llm=use_llm
+            )
             highlight_price = False
             highlight_reason: str | None = None
             quantity = 1.0
@@ -163,6 +242,17 @@ async def _match_act_rows(
                     f"{highlight_reason}; {inherit_reason}" if highlight_reason else inherit_reason
                 )
 
+            # Марка авто не распознана, а выбранная позиция категорийная:
+            # выбор категории фактически случаен — деградация должна быть видимой.
+            unknown_category = (
+                category is None and best_match is not None and bool(best_match.get("category"))
+            )
+            if unknown_category:
+                no_cat_reason = "Категория автомобиля не распознана — проверьте выбор категории"
+                highlight_reason = (
+                    f"{highlight_reason}; {no_cat_reason}" if highlight_reason else no_cat_reason
+                )
+
             results.append(
                 MatchResult(
                     upd_row_index=source_row.get("_row_index", 0),
@@ -170,7 +260,8 @@ async def _match_act_rows(
                     matched_position_number=best_match.get("number") if best_match else None,
                     matched_position_name=best_match.get("name") if best_match else None,
                     confidence=best_match.get("score", 0.0) if best_match else 0.0,
-                    needs_review=needs_review or best_match is None or highlight_price or inherited_used,
+                    needs_review=needs_review or best_match is None or highlight_price
+                    or inherited_used or unknown_category,
                     quantity=quantity,
                     unit=unit,
                     price=price,
@@ -225,12 +316,18 @@ async def _resolve_match(
     query: str,
     positions: list[dict[str, Any]],
     category_hint: str | None = None,
+    use_llm: bool = True,
 ) -> tuple[dict[str, Any] | None, bool]:
     ranked = _rank_positions(query, positions, category_hint)
     best_match = ranked[0] if ranked else None
 
     if best_match and best_match["score"] >= settings.FUZZY_MATCH_THRESHOLD:
         return best_match, False
+
+    # LLM выключена — мгновенная деградация: берём лучший fuzzy-кандидат
+    # с пометкой needs_review (поведение идентично недоступному Ollama).
+    if not use_llm:
+        return best_match, True
 
     llm_candidates = ranked[:20]
     if best_match and best_match["score"] >= settings.FUZZY_UNCERTAIN_THRESHOLD:
@@ -308,7 +405,7 @@ async def _llm_match(query: str, positions: list[dict[str, Any]]) -> dict[str, A
 """
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
             response = await client.post(
                 f"{settings.OLLAMA_BASE_URL}/api/generate",
                 json={
@@ -352,7 +449,9 @@ def _split_act_services(text: str) -> list[str]:
 
     for chunk in chunks:
         lower_chunk = chunk.lower()
-        if " и " in lower_chunk and sum(1 for marker in SERVICE_KEYWORDS if marker in lower_chunk) >= 2:
+        # Считаем вхождения, а не уникальные маркеры: «полировка кузова и
+        # полировка фар» содержит один маркер «полиров» дважды и тоже составная.
+        if " и " in lower_chunk and sum(lower_chunk.count(marker) for marker in SERVICE_KEYWORDS) >= 2:
             result.extend(
                 part.strip(" ,;")
                 for part in re.split(r"\s+и\s+", chunk)

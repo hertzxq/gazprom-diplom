@@ -145,7 +145,7 @@ export default function AdminPage() {
               gap: 'var(--spacing-md)',
               marginBottom: 'var(--spacing-lg)',
               padding: 'var(--spacing-lg)',
-              background: 'var(--color-surface-alt)',
+              background: 'var(--color-bg-tertiary)',
               borderRadius: 'var(--radius-lg)',
             }}
           >
@@ -155,7 +155,7 @@ export default function AdminPage() {
                 className="form-input"
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
-                placeholder="username"
+                placeholder="ivanov"
               />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -164,7 +164,7 @@ export default function AdminPage() {
                 className="form-input"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="user@example.com"
+                placeholder="ivanov@gazprom-expo.ru"
                 type="email"
               />
             </div>

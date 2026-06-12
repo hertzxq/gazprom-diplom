@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { manufacturersApi } from '../services/api';
 import toast from 'react-hot-toast';
 import {
@@ -7,18 +7,34 @@ import {
   Trash2,
   Factory,
   FileText,
-  Loader,
   ExternalLink,
   Award,
   Phone,
   Globe,
   Download,
+  XCircle,
 } from 'lucide-react';
 
 const TABS = [
   { id: 'specs', label: 'По характеристикам', icon: Search },
   { id: 'name', label: 'По наименованию', icon: FileText },
 ];
+
+// Активный поиск переживает F5 и уход со страницы: task_id хранится
+// в localStorage, опрос возобновляется при следующем монтировании.
+const TASK_STORAGE_KEY = 'manufacturerSearchTask';
+
+const POLL_INTERVAL_MS = 2500;
+
+function loadStoredTask() {
+  try {
+    const raw = localStorage.getItem(TASK_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.id && parsed?.kind ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 const handleExport = async (results, productName) => {
   if (!results || results.length === 0) {
@@ -47,6 +63,9 @@ const handleExport = async (results, productName) => {
 export default function ManufacturerSearchPage() {
   const [activeTab, setActiveTab] = useState('specs');
 
+  // Текущий фоновый поиск: { id, kind: 'specs' | 'name' } или null
+  const [activeTask, setActiveTask] = useState(loadStoredTask);
+
   // ─── Search by specs ───
   const [specsForm, setSpecsForm] = useState({
     product_name: '',
@@ -54,7 +73,6 @@ export default function ManufacturerSearchPage() {
     sources: '',
   });
   const [specsResults, setSpecsResults] = useState(null);
-  const [specsLoading, setSpecsLoading] = useState(false);
 
   // ─── Search by name ───
   const [nameForm, setNameForm] = useState({
@@ -62,7 +80,89 @@ export default function ManufacturerSearchPage() {
     sources: '',
   });
   const [nameResults, setNameResults] = useState(null);
-  const [nameLoading, setNameLoading] = useState(false);
+
+  const specsLoading = activeTask?.kind === 'specs';
+  const nameLoading = activeTask?.kind === 'name';
+
+  const startTask = (id, kind) => {
+    const next = { id, kind };
+    localStorage.setItem(TASK_STORAGE_KEY, JSON.stringify(next));
+    setActiveTask(next);
+  };
+
+  const finishTask = () => {
+    localStorage.removeItem(TASK_STORAGE_KEY);
+    setActiveTask(null);
+  };
+
+  // Опрос статуса фоновой задачи; перезапускается при смене activeTask
+  useEffect(() => {
+    if (!activeTask) return undefined;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await manufacturersApi.getTask(activeTask.id);
+        if (cancelled) return;
+        const t = res.data;
+        if (t.status === 'processed') {
+          if (activeTask.kind === 'specs') {
+            setSpecsResults({
+              results: t.results || [],
+              message: `Найдено производителей: ${(t.results || []).length}`,
+            });
+          } else {
+            setNameResults({
+              manufacturers: t.manufacturers || [],
+              documentation: t.documentation || [],
+              summary: t.summary || '',
+            });
+          }
+          setActiveTab(activeTask.kind);
+          toast.success('Поиск завершён');
+          finishTask();
+        } else if (t.status === 'error') {
+          if (t.cancelled) {
+            toast('Поиск отменён');
+          } else {
+            toast.error(t.error || 'Ошибка поиска');
+          }
+          finishTask();
+        }
+        // status === 'processing' — ждём следующего тика
+      } catch (err) {
+        if (cancelled) return;
+        // Задача не найдена (например, БД почистили) — прекращаем опрос
+        if (err.response?.status === 404) {
+          toast.error('Задача поиска не найдена');
+          finishTask();
+        }
+        // Сетевые ошибки молча переживаем — следующий тик повторит запрос
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTask]);
+
+  const handleCancelSearch = async () => {
+    if (!activeTask) return;
+    try {
+      await manufacturersApi.cancelTask(activeTask.id);
+      toast('Поиск отменён');
+      finishTask();
+    } catch (err) {
+      // 409 — поиск уже завершился; ближайший опрос заберёт результат
+      if (err.response?.status !== 409) {
+        toast.error(err.response?.data?.detail || 'Не удалось отменить поиск');
+      }
+    }
+  };
 
   // ─── Specs helpers ───
   const addCharacteristic = () => {
@@ -99,7 +199,6 @@ export default function ManufacturerSearchPage() {
       (c) => c.key.trim() && c.value.trim()
     );
 
-    setSpecsLoading(true);
     setSpecsResults(null);
 
     try {
@@ -111,12 +210,10 @@ export default function ManufacturerSearchPage() {
           : null,
       };
       const res = await manufacturersApi.searchBySpecs(payload);
-      setSpecsResults(res.data);
-      toast.success(res.data.message);
+      startTask(res.data.task_id, 'specs');
+      toast(res.data.message);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Ошибка поиска');
-    } finally {
-      setSpecsLoading(false);
     }
   };
 
@@ -126,7 +223,6 @@ export default function ManufacturerSearchPage() {
       return;
     }
 
-    setNameLoading(true);
     setNameResults(null);
 
     try {
@@ -137,12 +233,10 @@ export default function ManufacturerSearchPage() {
           : null,
       };
       const res = await manufacturersApi.searchByName(payload);
-      setNameResults(res.data);
-      toast.success(res.data.message);
+      startTask(res.data.task_id, 'name');
+      toast(res.data.message);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Ошибка поиска');
-    } finally {
-      setNameLoading(false);
     }
   };
 
@@ -179,22 +273,33 @@ export default function ManufacturerSearchPage() {
           <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
             <div className="card-header">
               <h2 className="card-title">Поиск по характеристикам</h2>
-              <button
-                id="search-specs-btn"
-                className="btn btn-primary btn-lg"
-                onClick={handleSearchBySpecs}
-                disabled={specsLoading}
-              >
-                {specsLoading ? (
-                  <>
-                    <div className="spinner" /> Поиск...
-                  </>
-                ) : (
-                  <>
-                    <Search size={16} /> Найти производителей
-                  </>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {specsLoading && (
+                  <button
+                    id="cancel-specs-btn"
+                    className="btn btn-danger"
+                    onClick={handleCancelSearch}
+                  >
+                    <XCircle size={16} /> Отменить
+                  </button>
                 )}
-              </button>
+                <button
+                  id="search-specs-btn"
+                  className="btn btn-primary btn-lg"
+                  onClick={handleSearchBySpecs}
+                  disabled={specsLoading}
+                >
+                  {specsLoading ? (
+                    <>
+                      <div className="spinner" /> Поиск...
+                    </>
+                  ) : (
+                    <>
+                      <Search size={16} /> Найти производителей
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="form-group">
@@ -296,7 +401,7 @@ export default function ManufacturerSearchPage() {
                     onClick={() => handleExport(specsResults.results, specsForm.product_name)}
                     style={{ marginLeft: '0.5rem' }}
                   >
-                    <Download size={14} /> Экспорт XLSX
+                    <Download size={14} /> Скачать XLSX
                   </button>
                 )}
               </div>
@@ -381,22 +486,33 @@ export default function ManufacturerSearchPage() {
           <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
             <div className="card-header">
               <h2 className="card-title">Поиск по наименованию</h2>
-              <button
-                id="search-name-btn"
-                className="btn btn-primary btn-lg"
-                onClick={handleSearchByName}
-                disabled={nameLoading}
-              >
-                {nameLoading ? (
-                  <>
-                    <div className="spinner" /> Поиск...
-                  </>
-                ) : (
-                  <>
-                    <Search size={16} /> Найти информацию
-                  </>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {nameLoading && (
+                  <button
+                    id="cancel-name-btn"
+                    className="btn btn-danger"
+                    onClick={handleCancelSearch}
+                  >
+                    <XCircle size={16} /> Отменить
+                  </button>
                 )}
-              </button>
+                <button
+                  id="search-name-btn"
+                  className="btn btn-primary btn-lg"
+                  onClick={handleSearchByName}
+                  disabled={nameLoading}
+                >
+                  {nameLoading ? (
+                    <>
+                      <div className="spinner" /> Поиск...
+                    </>
+                  ) : (
+                    <>
+                      <Search size={16} /> Найти информацию
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="form-group">
@@ -461,7 +577,7 @@ export default function ManufacturerSearchPage() {
                       onClick={() => handleExport(nameResults.manufacturers, nameForm.product_name)}
                       style={{ marginLeft: '0.5rem' }}
                     >
-                      <Download size={14} /> Экспорт XLSX
+                      <Download size={14} /> Скачать XLSX
                     </button>
                   )}
                 </div>

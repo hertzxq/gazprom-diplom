@@ -244,7 +244,67 @@ def _build_metrics(rows: list[SumupRow]) -> list[Optional[MetricRow]]:
         count=None,
     ))
 
+    # Доля СМСП — спецификация Tech_doc.md (Block 1, item 2):
+    # «расчёт процентов СМСП-договоров и закупок для СМСП».
+    metrics.append(None)  # 28 — пусто
+    metrics.append(_smsp_share_by_sum(rows, metrics))
+    metrics.append(_smsp_share_by_count(rows))
+
     return metrics
+
+
+def _excluded_categories() -> set[str]:
+    return {category for _, category in EXCLUSION_CATEGORIES_DISPLAY}
+
+
+def _is_smsp_eligible(row: SumupRow) -> bool:
+    """
+    Договор считается «СМСП после исключений» если:
+    - закупка только для СМСП (smsp_purchase=да), либо
+    - закупка для всех с участием СМСП (smsp_purchase=нет, smsp_type ≠ «нет»/пусто),
+      при этом не попадает в категорию исключений (exclusion=«нет»).
+    Логика отражает строки 14 + 24 итогового свода.
+    """
+    purchase = _norm(row.smsp_purchase)
+    smsp_type = _norm(row.smsp_type)
+    excl = _norm(row.exclusion_category)
+    if purchase == "да":
+        return True
+    if purchase == "нет" and smsp_type not in ("", "нет") and excl == "нет":
+        return True
+    return False
+
+
+def _smsp_share_by_sum(
+    rows: list[SumupRow], metrics: list[Optional[MetricRow]]
+) -> MetricRow:
+    """Доля суммы СМСП-договоров от итога за минусом исключений.
+
+    Индексы соответствуют позициям внутри `_build_metrics`:
+    - [10] — MetricRow «Итого за минусом исключений» (строка 12 xlsx)
+    - [25] — MetricRow «Итого с СМСП (за минусом исключений)» (строка 27 xlsx)
+    """
+    den = metrics[10].total_sum if metrics[10] else 0.0
+    num = metrics[25].total_sum if metrics[25] else 0.0
+    pct = (num / den * 100.0) if den else 0.0
+    return MetricRow(
+        label="Доля СМСП по сумме, %",
+        total_sum=round(pct, 2),
+        count=None,
+    )
+
+
+def _smsp_share_by_count(rows: list[SumupRow]) -> MetricRow:
+    """Доля количества СМСП-договоров от количества за минусом исключений."""
+    excluded = _excluded_categories()
+    total_minus_excl = sum(1 for r in rows if _norm(r.exclusion_category) not in excluded)
+    smsp_count = sum(1 for r in rows if _is_smsp_eligible(r))
+    pct = (smsp_count / total_minus_excl * 100.0) if total_minus_excl else 0.0
+    return MetricRow(
+        label="Доля СМСП по количеству, %",
+        total_sum=round(pct, 2),
+        count=smsp_count,
+    )
 
 
 def _total(rows: list[SumupRow], label: str) -> MetricRow:

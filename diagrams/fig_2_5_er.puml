@@ -1,0 +1,79 @@
+@startuml fig_2_5_er
+' Рисунок 2.5 — ER-диаграмма базы данных (по реальным моделям SQLAlchemy)
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 160
+skinparam defaultFontSize 12
+skinparam linetype ortho
+hide circle
+
+entity "users" as users {
+  * id : UUID <<PK>>
+  --
+  * username : VARCHAR(100) <<UQ>>
+  * email : VARCHAR(255) <<UQ>>
+  * password_hash : VARCHAR(255)
+  full_name : VARCHAR(255)
+  * role : ENUM(admin, user)
+  * is_active : BOOLEAN
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "documents" as documents {
+  * id : UUID <<PK>>
+  --
+  * filename : VARCHAR(500)
+  * original_filename : VARCHAR(500)
+  * file_type : ENUM (9 типов)
+  * file_path : VARCHAR(1000)
+  mime_type : VARCHAR(100)
+  file_size : INTEGER
+  * status : ENUM (5 статусов)
+  * version : INTEGER
+  metadata_json : JSONB
+  error_message : TEXT
+  uploaded_by : UUID <<FK -> users>>
+  * created_at, updated_at : TIMESTAMPTZ
+}
+
+entity "processing_tasks" as tasks {
+  * id : UUID <<PK>>
+  --
+  * task_type : VARCHAR(50)
+  * status : ENUM
+  * source_document_ids : JSONB
+  result_document_id : UUID <<FK -> documents>>
+  matching_data : JSONB
+  parameters : JSONB
+  created_by : UUID <<FK -> users>>
+  * created_at, updated_at : TIMESTAMPTZ
+}
+
+entity "notifications" as notif {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK -> users>>
+  * title : VARCHAR(255)
+  * message : TEXT
+  * notification_type : ENUM(info, success, warning, error)
+  * is_read : BOOLEAN
+  * created_at : TIMESTAMPTZ
+}
+
+entity "smsp_exclusion_rules" as rules {
+  * id : INTEGER <<PK>>
+  --
+  * category : VARCHAR(100) <<UQ>>
+  * keywords : JSONB
+  point_letter : VARCHAR(10)
+  * enabled : BOOLEAN
+  * order_idx : INTEGER
+  * created_at, updated_at : TIMESTAMPTZ
+}
+
+users ||..o{ documents : "uploaded_by"
+users ||..o{ tasks : "created_by"
+users ||..o{ notif : "user_id"
+documents |o..o{ tasks : "result_document_id"
+@enduml

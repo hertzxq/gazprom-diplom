@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr
@@ -88,6 +88,9 @@ class ProcessingRequest(BaseModel):
     inn_contractor: Optional[str] = None
     comments: Optional[str] = None
     scenario: Optional[str] = None
+    # LLM-верификация спорных позиций: None — по настройке сервера,
+    # фронт передаёт значение чекбокса явно (на CPU включение заметно медленнее).
+    use_llm: Optional[bool] = None
 
 
 class MatchResult(BaseModel):
@@ -199,11 +202,36 @@ class ManufacturerExportRequest(BaseModel):
     product_name: Optional[str] = None
 
 
+class ManufacturerTaskStartResponse(BaseModel):
+    """Ответ на запуск/отмену фонового поиска производителей."""
+    task_id: uuid.UUID
+    message: str
+
+
+class ManufacturerTaskStatusResponse(BaseModel):
+    """Статус фонового поиска для опроса с фронта (поля результата — по типу поиска)."""
+    task_id: uuid.UUID
+    task_type: str
+    status: str  # processing | processed | error
+    cancelled: bool = False
+    error: Optional[str] = None
+    # manufacturer_search_specs
+    results: Optional[list[ManufacturerResult]] = None
+    # manufacturer_search_name
+    manufacturers: Optional[list[ManufacturerResult]] = None
+    documentation: Optional[list[ManufacturerDocResult]] = None
+    summary: Optional[str] = None
+
+
 # ─── Task 2: первичный свод / свод СМСП ──────────────────────────────
 
 class PrimarySumupBuildRequest(BaseModel):
     payment_registry_id: uuid.UUID
     contract_registry_id: uuid.UUID
+    # Фильтры (по ТЗ Tech_doc.md, Block 1, item 2): период и пороговая сумма
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    min_amount: Optional[float] = None
 
 
 class PrimarySumupRowDto(BaseModel):

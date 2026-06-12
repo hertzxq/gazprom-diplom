@@ -1,6 +1,32 @@
-version: '3.8'
-
 services:
+  backend:
+    build: ./backend
+    container_name: gazprom-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gazprom:gazprom_secret@db:5432/gazprom_procurement
+      DATABASE_URL_SYNC: postgresql+psycopg2://gazprom:gazprom_secret@db:5432/gazprom_procurement
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/app/uploads
+      - generated:/app/generated
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+  frontend:
+    build: ./frontend
+    container_name: gazprom-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
   db:
     image: postgres:16-alpine
     container_name: gazprom-db
@@ -41,3 +67,5 @@ services:
 volumes:
   pgdata:
   ollama_data:
+  uploads:
+  generated:

@@ -13,6 +13,9 @@ const EMPTY_FORM = {
   inn_contractor: '',
   comments: '',
   scenario: '',
+  // LLM-верификация выключена по умолчанию: на CPU каждый спорный матч
+  // ждёт таймаут Ollama, обработка растягивается на минуты.
+  use_llm: false,
 };
 
 const SCENARIOS = [
@@ -50,9 +53,8 @@ export default function ProcessingPage() {
         template_document_id:
           prev.template_document_id || sorted.find((doc) => doc.file_type === 'template')?.id || '',
       }));
-    } catch (err) {
+    } catch {
       toast.error('Не удалось загрузить документы');
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -84,6 +86,7 @@ export default function ProcessingPage() {
         inn_contractor: form.inn_contractor || null,
         comments: form.comments || null,
         scenario: form.scenario || null,
+        use_llm: form.use_llm,
       };
 
       const res = await documentsApi.process(payload);
@@ -306,6 +309,43 @@ export default function ProcessingPage() {
                 Выберите сценарий обработки или оставьте «Автоопределение» для универсальной логики
               </div>
             </div>
+
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 'var(--spacing-md)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  id="use-llm-checkbox"
+                  type="checkbox"
+                  checked={form.use_llm}
+                  onChange={(e) => handleChange('use_llm', e.target.checked)}
+                />
+                <span className="form-label" style={{ marginBottom: 0 }}>
+                  LLM-верификация спорных позиций
+                </span>
+              </label>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+                Позиции с уверенностью 50–85% дополнительно проверяются локальной LLM (Mistral 7B).
+                На сервере без GPU это добавляет до 20 секунд на каждую спорную позицию.
+              </div>
+            </div>
+
+            {processing && (
+              <div className="loading-overlay" style={{ marginTop: 'var(--spacing-md)' }}>
+                <div className="spinner" />
+                <span>
+                  Идёт обработка: парсинг файлов → сопоставление позиций → генерация XLS.
+                  {form.use_llm
+                    ? ' Включена LLM-верификация — обработка может занять несколько минут.'
+                    : ' Обычно занимает несколько секунд.'}
+                </span>
+              </div>
+            )}
+
+            {(positionsFiles.length === 0 || sourceFiles.length === 0) && (
+              <div className="review-note" style={{ marginTop: 'var(--spacing-md)' }}>
+                Для обработки нужны файл позиций и УПД/Акт. Загрузите их на странице «Загрузка»,
+                указав правильный тип каждого файла.
+              </div>
+            )}
           </>
         )}
       </div>
@@ -329,7 +369,7 @@ export default function ProcessingPage() {
                 <AlertTriangle size={12} /> На проверку: {reviewCount}
               </span>
               <button className="btn btn-secondary" onClick={handleDownloadResult}>
-                <Download size={16} /> Скачать XLS
+                <Download size={16} /> Скачать XLSX
               </button>
             </div>
           </div>

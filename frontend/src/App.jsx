@@ -14,10 +14,12 @@ import {
   Check,
   Users,
   Calculator,
+  LayoutDashboard,
 } from 'lucide-react';
 
 import LoginPage from './pages/LoginPage';
 
+import DashboardPage from './pages/DashboardPage';
 import UploadPage from './pages/UploadPage';
 import ProcessingPage from './pages/ProcessingPage';
 import ManufacturerSearchPage from './pages/ManufacturerSearchPage';
@@ -257,12 +259,23 @@ function AppLayout() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-logo">Система закупок</div>
+          <div className="sidebar-logo">
+            <img src="/logo.png" alt="Логотип системы закупок" className="sidebar-logo-img" />
+            Система закупок
+          </div>
           <div className="sidebar-subtitle">Поддержка закупочной деятельности</div>
         </div>
 
         <nav className="sidebar-nav">
 
+          <NavLink
+            to="/dashboard"
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            id="nav-dashboard"
+          >
+            <LayoutDashboard size={18} />
+            <span>Дашборд</span>
+          </NavLink>
           <NavLink
             to="/upload"
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -366,12 +379,15 @@ function AppLayout() {
       {/* Main */}
       <main className="main-content">
         <Routes>
-          <Route path="/" element={<Navigate to="/manufacturers" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/processing" element={<ProcessingPage />} />
           <Route path="/task2" element={<Task2Page />} />
           <Route path="/manufacturers" element={<ManufacturerSearchPage />} />
           <Route path="/admin" element={<AdminPage />} />
+          {/* Неизвестный URL — на главную, а не пустая страница */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

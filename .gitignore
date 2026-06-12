@@ -29,3 +29,29 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Артефакты диплома
+diagrams/plantuml.jar
+_build*.log
+~$*.docx
+*.docx.bak
+/*.docx
+Diploma_Prompt.md
+WORK_RESULT.md
+# корневой дубль логотипа (рабочая копия — frontend/public/logo.png)
+/logo.png
+
+# Служебные каталоги инструментов
+.playwright-mcp/
+.planning/
+.claude/settings.local.json
+
+# Логи и артефакты запуска/тестов
+*.log
+.coverage
+backend/tests/_tmp_uploads/
+backend/tests/_tmp_generated/
+backend/tmp_pip/
+backend/_validate.py
+backend/_hybrid_*.txt
+.pytest_cache/

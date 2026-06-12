@@ -1,0 +1,25 @@
+@startuml fig_2_4_deployment
+' Рисунок 2.4 — Диаграмма развёртывания
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 160
+skinparam defaultFontSize 13
+
+node "Рабочая станция пользователя" as ws {
+  component "Веб-браузер\n(Chrome 90+ / Firefox 90+ / Edge 90+)" as browser
+}
+
+node "Сервер (Linux, 16 ГБ RAM)" as srv {
+  node "Docker Compose" as docker {
+    component "frontend\nReact + nginx\nпорт 3000" as fe
+    component "backend\nFastAPI + uvicorn\nпорт 8000" as be
+    database "db\nPostgreSQL 16-alpine\nпорт 5433:5432" as db
+    component "ollama\nMistral 7B Instruct\nпорт 11434" as ol
+  }
+}
+
+browser --> fe : HTTP :3000
+fe --> be : проксирование /api
+be --> db : SQL :5432\n(внутренняя сеть Docker)
+be --> ol : HTTP :11434\n(внутренняя сеть Docker)
+@enduml

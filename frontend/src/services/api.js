@@ -16,11 +16,15 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 errors (expired token)
+// Handle 401 errors (expired token).
+// Сам запрос логина и страница /login исключены: иначе неверный пароль
+// вызывал перезагрузку страницы и сообщение об ошибке не показывалось.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isLoginRequest = error.config?.url?.includes('/auth/login');
+    const onLoginPage = window.location.pathname === '/login';
+    if (error.response?.status === 401 && !isLoginRequest && !onLoginPage) {
       localStorage.removeItem('token');
       window.location.href = '/login';
     }
@@ -56,8 +60,11 @@ export const documentsApi = {
 
 // ─── Manufacturers ───
 export const manufacturersApi = {
+  // Поиск асинхронный: POST сразу возвращает task_id, статус опрашивается getTask
   searchBySpecs: (data) => api.post('/manufacturers/search-by-specs', data),
   searchByName: (data) => api.post('/manufacturers/search-by-name', data),
+  getTask: (taskId) => api.get(`/manufacturers/tasks/${taskId}`),
+  cancelTask: (taskId) => api.post(`/manufacturers/tasks/${taskId}/cancel`),
   export: (data) =>
     api.post('/manufacturers/export', data, { responseType: 'blob' }),
 };

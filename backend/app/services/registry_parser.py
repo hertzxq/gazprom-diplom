@@ -69,7 +69,7 @@ class PaymentRow:
     contract_number: str
     contract_date: Optional[date]
     contract_sum: Optional[float]
-    payment_sum: Optional[float]       # сумма в рублях (с учётом AK для валютных)
+    payment_sum: Optional[float]       # сумма в рублях (с учётом AJ для валютных)
     currency: str
     smsp_type: str
     smsp_purchase: str
@@ -112,12 +112,12 @@ def parse_payment_registry(file_path: str) -> list[PaymentRow]:
         payment_sum_raw = _cell(raw, PAYMENT_COL["payment_sum"])
         payment_sum_rub_raw = _cell(raw, PAYMENT_COL["payment_amount_rub"])
 
-        # Для валютных платежей берём колонку AK (уже в рублях).
+        # Для валютных платежей берём колонку AJ (уже в рублях, см. PAYMENT_COL).
         # Для RUB — колонку K. В обеих — возможны множественные платежи через `;`.
         if currency.upper() != "RUB":
             total, multi = _parse_payment_amount(payment_sum_rub_raw)
             if total is None:
-                # fallback: если AK пуст — попробуем K, это всё равно будет в валюте,
+                # fallback: если AJ пуст — попробуем K, это всё равно будет в валюте,
                 # но хотя бы не потеряем сумму
                 total, multi = _parse_payment_amount(payment_sum_raw)
         else:

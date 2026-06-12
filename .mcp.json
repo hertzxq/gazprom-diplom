@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "magicui": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@magicuidesign/mcp@latest"]
+    }
+  }
+}

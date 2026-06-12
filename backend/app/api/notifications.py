@@ -46,6 +46,11 @@ async def mark_as_read(
     if not notification:
         raise HTTPException(status_code=404, detail="Уведомление не найдено")
     notification.is_read = True
+    # Без явного flush объект помечается «грязным», но на этой сессии get_db()
+    # коммитит при выходе. Однако response_model сериализует объект ДО коммита,
+    # поэтому при перечитывании из той же сессии состояние корректное;
+    # явный flush гарантирует попадание UPDATE в БД даже если ниже добавятся ветки.
+    await db.flush()
     return notification
 
 

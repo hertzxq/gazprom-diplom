@@ -16,6 +16,11 @@ export default function Task2Page() {
   const [building, setBuilding] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Фильтры расчёта (Tech_doc.md, Block 1, item 2)
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+
   const [task, setTask] = useState(null); // { task_id, document_id, rows, ... }
   const [finalResult, setFinalResult] = useState(null);
 
@@ -61,9 +66,13 @@ export default function Task2Page() {
     setTask(null);
     setFinalResult(null);
     try {
+      const minAmountValue = minAmount ? Number(minAmount) : null;
       const res = await task2Api.buildPrimarySumup({
         payment_registry_id: paymentId,
         contract_registry_id: contractId,
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        min_amount: Number.isFinite(minAmountValue) ? minAmountValue : null,
       });
       setTask(res.data);
       setStep(2);
@@ -121,6 +130,10 @@ export default function Task2Page() {
     if (!task?.document_id) return;
     setBuilding(true);
     try {
+      // Сначала фиксируем текущее состояние таблицы: бэкенд строит итоговый
+      // свод из сохранённых данных задачи, и без этого правки селектов
+      // (исключения, «длящийся», публикация) молча игнорировались бы.
+      await task2Api.updatePrimarySumup(task.task_id, { rows: task.rows });
       const res = await task2Api.buildFinalSummary({ primary_sumup_id: task.document_id });
       setFinalResult(res.data);
       setStep(3);
@@ -143,6 +156,8 @@ export default function Task2Page() {
 
       <Stepper step={step} />
 
+      {/* key={step} перезапускает blur-fade при смене шага — плавный переход мастера */}
+      <div key={step} className="fade-in">
       {step === 1 && (
         <StepOne
           loading={loading}
@@ -152,6 +167,12 @@ export default function Task2Page() {
           setPaymentId={setPaymentId}
           contractId={contractId}
           setContractId={setContractId}
+          dateFrom={dateFrom}
+          setDateFrom={setDateFrom}
+          dateTo={dateTo}
+          setDateTo={setDateTo}
+          minAmount={minAmount}
+          setMinAmount={setMinAmount}
           building={building}
           onBuild={handleBuild}
         />
@@ -177,6 +198,7 @@ export default function Task2Page() {
           onBack={() => setStep(2)}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -184,45 +206,15 @@ export default function Task2Page() {
 function Stepper({ step }) {
   const labels = ['Загрузка и выбор', 'Первичный свод', 'Итоговый свод'];
   return (
-    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: 'var(--spacing-lg)' }}>
+    <div className="t2-stepper">
       {labels.map((label, i) => {
         const n = i + 1;
         const active = step === n;
         const done = step > n;
         return (
-          <div
-            key={label}
-            style={{
-              flex: 1,
-              padding: '0.75rem 1rem',
-              borderRadius: 'var(--radius-md)',
-              background: active
-                ? 'var(--color-primary-dim)'
-                : done
-                ? '#e8f4ea'
-                : 'var(--color-bg-secondary)',
-              border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
-              fontWeight: active ? 700 : 500,
-              color: active ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
-          >
-            <span
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: '50%',
-                background: active || done ? 'var(--color-primary)' : 'var(--color-bg-primary)',
-                color: active || done ? '#fff' : 'var(--color-text-muted)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.75rem',
-              }}
-            >
-              {done ? <CheckCircle size={14} /> : n}
+          <div key={label} className={`t2-step ${active ? 'active' : ''} ${done ? 'done' : ''}`}>
+            <span className="t2-step-num">
+              {done ? <CheckCircle size={13} /> : n}
             </span>
             {label}
           </div>
@@ -240,6 +232,12 @@ function StepOne({
   setPaymentId,
   contractId,
   setContractId,
+  dateFrom,
+  setDateFrom,
+  dateTo,
+  setDateTo,
+  minAmount,
+  setMinAmount,
   building,
   onBuild,
 }) {
@@ -300,6 +298,36 @@ function StepOne({
               ))}
             </select>
           </div>
+          <div className="form-group">
+            <label className="form-label">Период с</label>
+            <input
+              type="date"
+              className="form-input"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Период по</label>
+            <input
+              type="date"
+              className="form-input"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Мин. сумма платежа, ₽</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="form-input"
+              value={minAmount}
+              onChange={(e) => setMinAmount(e.target.value)}
+              placeholder="без порога"
+            />
+          </div>
         </div>
       )}
       {!loading && (paymentFiles.length === 0 || contractFiles.length === 0) && (
@@ -332,8 +360,13 @@ function StepTwo({ task, onRowChange, saving, building, onSave, onDownload, onBa
       <div className="card-header">
         <div>
           <h2 className="card-title">Шаг 2. Первичный свод</h2>
-          <p className="page-subtitle" style={{ marginTop: '0.25rem' }}>
-            Строк: {task.rows_total} · Без сопоставления с реестром договоров: {unmatched}
+          <p style={{ marginTop: '0.375rem', fontSize: '0.875rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            Строк: {task.rows_total}
+            {unmatched > 0 && (
+              <span className="badge badge-warning">
+                <AlertTriangle size={11} /> без сопоставления: {unmatched}
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -341,7 +374,7 @@ function StepTwo({ task, onRowChange, saving, building, onSave, onDownload, onBa
             Назад
           </button>
           <button className="btn btn-secondary" onClick={onDownload}>
-            <Download size={14} /> Скачать xlsx
+            <Download size={14} /> Скачать XLSX
           </button>
           <button className="btn btn-secondary" onClick={onSave} disabled={saving}>
             {saving ? <div className="spinner" /> : <Save size={14} />} Сохранить правки
@@ -352,93 +385,104 @@ function StepTwo({ task, onRowChange, saving, building, onSave, onDownload, onBa
         </div>
       </div>
 
-      <div style={{ overflow: 'auto', maxHeight: '65vh', border: '1px solid var(--color-border)' }}>
-        <table className="task2-table" style={{ minWidth: 1400, width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+      <div className="t2-scroll">
+        <table className="task2-table">
           <thead>
             <tr>
-              <th>Дата</th>
-              <th>Контрагент</th>
-              <th>№ договора</th>
-              <th>Дата дог.</th>
-              <th>Сумма дог.</th>
-              <th>Σ платежей</th>
-              <th>Вид СМСП</th>
-              <th>Закупка для СМСП</th>
+              <th className="t2-stick t2-stick-1">Дата</th>
+              <th className="t2-stick t2-stick-2">Контрагент</th>
+              <th>Договор</th>
+              <th style={{ textAlign: 'right' }}>Сумма дог.</th>
+              <th style={{ textAlign: 'right' }}>Σ платежей</th>
+              <th>СМСП</th>
               <th>Способ</th>
-              <th>Исключение</th>
-              <th>K — с</th>
-              <th>L — по</th>
-              <th>Длящ.</th>
-              <th>Публ. ЕИС</th>
+              <th>Действие, с–по</th>
+              <th className="t2-edit t2-edit-first">Исключение</th>
+              <th className="t2-edit">Длящ.</th>
+              <th className="t2-edit">Публ. ЕИС</th>
             </tr>
           </thead>
           <tbody>
-            {task.rows.map((row, i) => (
-              <tr
-                key={i}
-                style={{
-                  background: row.has_contract_match
-                    ? 'transparent'
-                    : 'rgba(255, 165, 0, 0.05)',
-                }}
-              >
-                <td>{fmtDate(row.date)}</td>
-                <td style={{ maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.contragent}>
-                  {row.contragent}
-                </td>
-                <td>{row.contract_number}</td>
-                <td>{fmtDate(row.contract_date)}</td>
-                <td style={{ textAlign: 'right' }}>{fmtMoney(row.contract_sum)}</td>
-                <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(row.payment_sum)}</td>
-                <td>{row.smsp_type}</td>
-                <td>{row.smsp_purchase}</td>
-                <td>{row.purchase_method}</td>
-                <td>
-                  <select
-                    className="form-select"
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    value={row.exclusion_category}
-                    onChange={(e) => onRowChange(i, 'exclusion_category', e.target.value)}
+            {task.rows.map((row, i) => {
+              const matched = row.has_contract_match;
+              const rowBg = matched ? '#ffffff' : '#fffaf2';
+              return (
+                <tr key={i} style={{ background: rowBg }}>
+                  <td
+                    className="t2-stick t2-stick-1"
+                    style={{
+                      background: rowBg,
+                      ...(matched ? {} : { borderLeft: '3px solid var(--color-warning)' }),
+                    }}
                   >
-                    {EXCLUSION_OPTIONS.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>{fmtDate(row.action_from)}</td>
-                <td>{fmtDate(row.action_to)}</td>
-                <td>
-                  <select
-                    className="form-select"
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    value={row.is_continuing}
-                    onChange={(e) => onRowChange(i, 'is_continuing', e.target.value)}
+                    {fmtDate(row.date)}
+                  </td>
+                  <td
+                    className="t2-stick t2-stick-2"
+                    style={{ background: rowBg }}
+                    title={row.contragent}
                   >
-                    {YESNO_OPTIONS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="form-select"
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    value={row.publication}
-                    onChange={(e) => onRowChange(i, 'publication', e.target.value)}
-                  >
-                    {YESNO_OPTIONS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
+                    <div className="t2-contragent">{row.contragent}</div>
+                  </td>
+                  <td>
+                    <div className="t2-main">{row.contract_number || '—'}</div>
+                    <div className="t2-sub">{fmtDate(row.contract_date)}</div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(row.contract_sum)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(row.payment_sum)}</td>
+                  <td>
+                    <div className="t2-main">{row.smsp_type}</div>
+                    <div className="t2-sub">закупка: {row.smsp_purchase}</div>
+                  </td>
+                  <td>{row.purchase_method}</td>
+                  <td>
+                    <div className="t2-main">{fmtDate(row.action_from) || '—'}</div>
+                    <div className="t2-sub">
+                      {fmtDate(row.action_to) ? `– ${fmtDate(row.action_to)}` : ''}
+                    </div>
+                  </td>
+                  <td className="t2-edit t2-edit-first">
+                    <select
+                      className="form-select"
+                      value={row.exclusion_category}
+                      onChange={(e) => onRowChange(i, 'exclusion_category', e.target.value)}
+                    >
+                      {EXCLUSION_OPTIONS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="t2-edit">
+                    <select
+                      className="form-select"
+                      value={row.is_continuing}
+                      onChange={(e) => onRowChange(i, 'is_continuing', e.target.value)}
+                    >
+                      {YESNO_OPTIONS.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="t2-edit">
+                    <select
+                      className="form-select"
+                      value={row.publication}
+                      onChange={(e) => onRowChange(i, 'publication', e.target.value)}
+                    >
+                      {YESNO_OPTIONS.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -457,7 +501,7 @@ function StepThree({ result, onDownload, onBack }) {
             Назад
           </button>
           <button className="btn btn-primary btn-lg" onClick={onDownload}>
-            <Download size={16} /> Скачать xlsx (3 вкладки)
+            <Download size={16} /> Скачать XLSX (3 вкладки)
           </button>
         </div>
       </div>
@@ -466,24 +510,26 @@ function StepThree({ result, onDownload, onBack }) {
         {sheets.map(([name, metrics]) => (
           <div key={name}>
             <h3 style={{ marginBottom: '0.5rem' }}>{name}</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-              <thead>
-                <tr>
-                  <th>Показатель</th>
-                  <th style={{ textAlign: 'right' }}>Сумма, ₽</th>
-                  <th style={{ textAlign: 'right' }}>Кол-во договоров</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metrics.map((m, i) => (
-                  <tr key={i}>
-                    <td>{m.label}</td>
-                    <td style={{ textAlign: 'right' }}>{fmtMoney(m.total_sum)}</td>
-                    <td style={{ textAlign: 'right' }}>{m.count == null ? '—' : m.count}</td>
+            <div className="table-container">
+              <table style={{ width: '100%', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr>
+                    <th>Показатель</th>
+                    <th style={{ textAlign: 'right' }}>Сумма, ₽</th>
+                    <th style={{ textAlign: 'right' }}>Кол-во договоров</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {metrics.map((m, i) => (
+                    <tr key={i}>
+                      <td>{m.label}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtMoney(m.total_sum)}</td>
+                      <td style={{ textAlign: 'right' }}>{m.count == null ? '—' : m.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ))}
       </div>

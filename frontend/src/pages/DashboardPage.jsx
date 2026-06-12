@@ -1,366 +1,362 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { documentsApi, analyticsApi } from '../services/api';
-import { Download, LayoutDashboard } from 'lucide-react';
+import { CheckCircle2, Clock3, AlertTriangle } from 'lucide-react';
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
 } from 'recharts';
+import NumberTicker from '../components/magicui/NumberTicker';
+import BlurFade from '../components/magicui/BlurFade';
 
-// --- MOCK DATA ---
-const topItemsData = [
-  { name: 'Трубы стальные', value: 245000 },
-  { name: 'Запорная арматура', value: 210000 },
-  { name: 'Кабель ВВГнг', value: 195000 },
-  { name: 'Насосные агрегаты', value: 180000 },
-  { name: 'Спецодежда', value: 155000 },
-  { name: 'КИПиА', value: 140000 },
-  { name: 'Дизель-генераторы', value: 135000 },
-  { name: 'Буровые реагенты', value: 120000 },
-  { name: 'Метизы (болты/гайки)', value: 115000 },
-  { name: 'Цемент тампонаж.', value: 105000 },
-].reverse(); // Reverse for bottom-up horizontal bar
+// Палитра данных в духе системных цветов Apple — контраст с фоном ≥3:1
+const CHART_COLORS = ['#0a84ff', '#5e5ce6', '#ff9f0a', '#ff453a', '#30d158', '#64d2ff', '#bf5af2', '#ffd60a', '#ac8e68'];
 
-const regionStatusData = [
-  { name: 'ЯНАО', 'Новые': 45, 'Действующие': 140 },
-  { name: 'ХМАО', 'Новые': 30, 'Действующие': 150 },
-  { name: 'Томск',  'Новые': 60, 'Действующие': 80 },
-  { name: 'Сахалин',  'Новые': 25, 'Действующие': 110 },
-  { name: 'Иркутск',  'Новые': 40, 'Действующие': 95 },
-];
+const AXIS_TICK = { fontSize: 11, fill: '#86868b' };
 
-const activityTrendData = [
-  { name: '01', new: 15, existing: 35 },
-  { name: '02', new: 10, existing: 38 },
-  { name: '03', new: 14, existing: 36 },
-  { name: '04', new: 12, existing: 45 },
-  { name: '05', new: 18, existing: 39 },
-  { name: '06', new: 24, existing: 44 },
-  { name: '07', new: 15, existing: 35 },
-  { name: '08', new: 11, existing: 31 },
-  { name: '09', new: 13, existing: 27 },
-  { name: '10', new: 9,  existing: 35 },
-  { name: '11', new: 14, existing: 32 },
-  { name: '12', new: 10, existing: 25 },
-];
+const FILE_TYPE_LABELS = {
+  positions: 'Прайс-листы',
+  upd: 'УПД',
+  act: 'Акты',
+  template: 'Шаблоны',
+  generated: 'Результаты',
+  payment_registry: 'Реестры платежей',
+  contract_registry: 'Реестры договоров',
+  primary_sumup: 'Первичный свод',
+  report: 'Отчёты',
+};
 
-const volumeTrendData = [
-  { name: '01', prev: 180, curr: 200 },
-  { name: '02', prev: 190, curr: 210 },
-  { name: '03', prev: 175, curr: 185 },
-  { name: '04', prev: 180, curr: 195 },
-  { name: '05', prev: 200, curr: 215 },
-  { name: '06', prev: 190, curr: 205 },
-  { name: '07', prev: 210, curr: 230 },
-  { name: '08', prev: 195, curr: 200 },
-  { name: '09', prev: 215, curr: 220 },
-  { name: '10', prev: 190, curr: 205 },
-  { name: '11', prev: 200, curr: 240 },
-  { name: '12', prev: 185, curr: 220 },
-];
+const STATUS_LABELS = {
+  uploaded: 'Загружен',
+  processing: 'В обработке',
+  processed: 'Обработан',
+  verified: 'Проверен',
+  error: 'Ошибка',
+};
 
-const COLORS = ['#eab308', '#60a5fa', '#003e92', '#f97316', '#10b981', '#cbd5e1', '#ef4444', '#8b5cf6'];
-const PIE_COLORS = ['#3b82f6', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6'];
+const EMPTY_STATS = {
+  total: 0,
+  processed: 0,
+  pending: 0,
+  errors: 0,
+  success_rate: 0,
+  error_rate: 0,
+  by_status: {},
+  by_type: {},
+  monthly: [],
+  yearly: [],
+  volume_trend: [],
+  top_items: [],
+  region_status: [],
+};
+
+function todayLabel() {
+  const raw = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// Glass-тултип графиков — единый для всех чартов
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{
+      background: 'rgba(255, 255, 255, 0.85)',
+      backdropFilter: 'saturate(180%) blur(12px)',
+      WebkitBackdropFilter: 'saturate(180%) blur(12px)',
+      border: '1px solid rgba(0,0,0,0.06)',
+      padding: '8px 12px',
+      borderRadius: '12px',
+      fontSize: '12px',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+    }}>
+      {label && <p style={{ margin: 0, fontWeight: 600, marginBottom: '4px' }}>{label}</p>}
+      {payload.map((p, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, color: '#1d1d1f' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.payload?.fill, flexShrink: 0 }} />
+          {p.name}: <strong>{p.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="dash-grid" style={{ gap: '1.5rem' }}>
+      <div className="dash-grid dash-grid-kpi">
+        {[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 132 }} />)}
+      </div>
+      <div className="dash-grid dash-grid-main">
+        <div className="skeleton" style={{ height: 280 }} />
+        <div className="skeleton" style={{ height: 280 }} />
+      </div>
+      <div className="dash-grid dash-grid-three">
+        {[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 260 }} />)}
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState([]);
-  const [stats, setStats] = useState({ total: 124, processed: 98, pending: 26 });
+  const [stats, setStats] = useState(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     loadAll();
   }, []);
 
   const loadAll = async () => {
+    setError(null);
     try {
-      const docsRes = await documentsApi.list({ limit: 12 });
-      setDocuments(docsRes.data);
-      const analyticsRes = await analyticsApi.getSummary();
-      const data = analyticsRes.data;
-      setStats({
-        total: data.total || 124,
-        processed: data.processed || 98,
-        pending: data.pending || 26,
-      });
-    } catch (err) {
-      console.error(err);
+      const [docsRes, analyticsRes] = await Promise.all([
+        documentsApi.list({ limit: 12 }),
+        analyticsApi.getSummary(),
+      ]);
+      setDocuments(docsRes.data || []);
+      setStats({ ...EMPTY_STATS, ...(analyticsRes.data || {}) });
+    } catch {
+      setError('Не удалось загрузить статистику');
     } finally {
       setLoading(false);
     }
   };
 
-  const dashboardStyles = {
-    layout: { display: 'flex', flexDirection: 'column', gap: '1.25rem' },
-    headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-    title: { fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-primary)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.5rem' },
-    filters: { display: 'flex', gap: '1rem', alignItems: 'center', fontSize: '0.875rem' },
-    select: { padding: '4px 12px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.875rem', background: '#fff' },
-    radioGroup: { display: 'flex', gap: '1.5rem', alignItems: 'center', fontSize: '0.875rem', padding: '0.5rem 0' },
-    threeCols: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem' },
-    
-    kpiCard: { padding: '1.25rem', borderRadius: '8px', color: '#fff', boxShadow: 'var(--shadow-md)', position: 'relative', overflow: 'hidden' },
-    kpiTitle: { fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, marginBottom: '0.75rem' },
-    kpiValue: { fontSize: '2.5rem', fontWeight: 700, margin: '0.5rem 0' },
-    kpiRow: { display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', opacity: 0.9, marginTop: '4px' },
-    
-    chartCard: { background: '#fff', borderRadius: '8px', padding: '1rem', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' },
-    chartTitle: { fontSize: '0.9rem', fontWeight: 700, color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' },
-    titleIcon: { width: '4px', height: '14px', background: 'var(--color-primary)', borderRadius: '2px' },
-    
-    tableContainer: { overflowX: 'auto', flex: 1 },
-    table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'center' },
-    th: { background: '#f8fafc', padding: '6px 8px', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: 600 },
-    td: { padding: '6px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155' }
-  };
+  const byTypeData = useMemo(
+    () => Object.entries(stats.by_type || {}).map(([key, value]) => ({
+      name: FILE_TYPE_LABELS[key] || key,
+      value,
+    })),
+    [stats.by_type]
+  );
 
-  const getKPIStyle = (type) => {
-    if (type === 'blue') return { background: 'linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%)' };
-    if (type === 'orange') return { background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)' };
-    if (type === 'yellow') return { background: 'linear-gradient(135deg, #eab308 0%, #a16207 100%)' };
-  };
+  const renderEmptyOr = (data, render) =>
+    !data || data.length === 0 ? (
+      <div className="dash-empty">Нет данных за выбранный период</div>
+    ) : (
+      <ResponsiveContainer>{render()}</ResponsiveContainer>
+    );
 
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div style={{ background: '#fff', border: '1px solid #ccc', padding: '8px', borderRadius: '4px', fontSize: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-          <p style={{ margin: 0, fontWeight: 600, marginBottom: '4px' }}>{label}</p>
-          {payload.map((p, i) => (
-            <div key={i} style={{ color: p.color, margin: 0 }}>
-              {p.name}: {p.value}
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
+  const kpiCards = [
+    {
+      icon: <CheckCircle2 size={20} strokeWidth={1.8} />,
+      iconClass: 'kpi-icon-blue',
+      label: 'Доля обработанных документов',
+      value: <NumberTicker value={stats.success_rate} suffix="%" />,
+      meta: [`Всего: ${stats.total}`, `Обработано: ${stats.processed}`],
+    },
+    {
+      icon: <Clock3 size={20} strokeWidth={1.8} />,
+      iconClass: 'kpi-icon-orange',
+      label: 'В работе / в очереди',
+      value: <NumberTicker value={stats.pending} />,
+      meta: [
+        `Загружено: ${stats.by_status?.uploaded || 0}`,
+        `В обработке: ${stats.by_status?.processing || 0}`,
+      ],
+    },
+    {
+      icon: <AlertTriangle size={20} strokeWidth={1.8} />,
+      iconClass: 'kpi-icon-red',
+      label: 'Доля ошибок',
+      value: <NumberTicker value={stats.error_rate} suffix="%" />,
+      meta: [`С ошибками: ${stats.errors}`, `Из ${stats.total}`],
+    },
+  ];
 
   return (
-    <div className="fade-in" style={{ background: '#f8f9fa', minHeight: '100%', padding: '0 0.5rem' }}>
-      
-      {/* Header */}
-      <div style={dashboardStyles.headerRow}>
-        <div style={dashboardStyles.title}>
-          Аналитика закупочной деятельности (Dashboard)
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <BlurFade>
+        <div className="dash-header">
+          <h1 className="dash-title">Аналитика закупочной деятельности</h1>
+          <span className="dash-date">{todayLabel()}</span>
         </div>
-        <div style={dashboardStyles.filters}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>Выбор даты:</span>
-            <select style={dashboardStyles.select} defaultValue="2024">
-              <option value="2023">2023</option>
-              <option value="2024">2024</option>
-            </select>
-            <select style={dashboardStyles.select} defaultValue="03">
-              <option value="01">Январь</option>
-              <option value="02">Февраль</option>
-              <option value="03">Март</option>
-            </select>
-          </label>
+      </BlurFade>
+
+      {error && (
+        <div role="alert" style={{
+          padding: '0.75rem 1rem', background: '#fee2e2', border: '1px solid #fca5a5',
+          borderRadius: 'var(--radius-md)', color: '#991b1b', fontSize: '0.875rem',
+        }}>
+          {error}
         </div>
-      </div>
+      )}
 
-      {/* Regions / Tabs */}
-      <div style={dashboardStyles.radioGroup}>
-        {['Полный контур', 'ЦФО', 'СЗФО', 'УФО', 'СФО', 'ДФО'].map((r, i) => (
-          <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: i === 0 ? 'var(--color-primary)' : '#64748b', fontWeight: i===0 ? 600 : 400 }}>
-            <input type="radio" name="region" defaultChecked={i === 0} style={{ accentColor: 'var(--color-primary)' }} />
-            {r}
-          </label>
-        ))}
-      </div>
-
-      <div style={dashboardStyles.layout}>
-        {/* ROW 1: KPI Cards */}
-        <div style={dashboardStyles.threeCols}>
-          <div style={{...dashboardStyles.kpiCard, ...getKPIStyle('blue')}}>
-            <div style={dashboardStyles.kpiTitle}>Выполнение плана обработки</div>
-            <div style={dashboardStyles.kpiValue}>
-              {Math.round((stats.processed / (stats.total || 1)) * 100)}%
-            </div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Целевой показатель: {stats.total}</span>
-            </div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Фактически обработано: {stats.processed}</span>
-            </div>
-          </div>
-          <div style={{...dashboardStyles.kpiCard, ...getKPIStyle('orange')}}>
-            <div style={dashboardStyles.kpiTitle}>Аналитика: Новые поставщики</div>
-            <div style={dashboardStyles.kpiValue}>39.32%</div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Целевой охват: 1063</span>
-            </div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Фактический охват: 418</span>
-            </div>
-          </div>
-          <div style={{...dashboardStyles.kpiCard, ...getKPIStyle('yellow')}}>
-            <div style={dashboardStyles.kpiTitle}>Аналитика: Действующие поставщики</div>
-            <div style={dashboardStyles.kpiValue}>29.30%</div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Целевой охват: 372</span>
-            </div>
-            <div style={dashboardStyles.kpiRow}>
-              <span>Фактический охват: 109</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ROW 2: Mixed Charts */}
-        <div style={dashboardStyles.threeCols}>
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Динамика загрузки документов (Тренд)</div>
-            <div style={{ height: 220 }}>
-              <ResponsiveContainer>
-                <BarChart data={volumeTrendData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Bar dataKey="prev" name="2023" fill="#60a5fa" barSize={12} radius={[2,2,0,0]} />
-                  <Bar dataKey="curr" name="2024" fill="#3b82f6" barSize={12} radius={[2,2,0,0]} />
-                  <LineChart data={volumeTrendData}>
-                     <Line type="monotone" dataKey="curr" stroke="#1d4ed8" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
-                  </LineChart>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+      {loading ? <DashboardSkeleton /> : (
+        <>
+          {/* KPI */}
+          <div className="dash-grid dash-grid-kpi stagger">
+            {kpiCards.map((kpi) => (
+              <div key={kpi.label} className="dash-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div className={`kpi-icon ${kpi.iconClass}`}>{kpi.icon}</div>
+                  <div className="kpi-label">{kpi.label}</div>
+                </div>
+                <div className="kpi-value" style={{ marginTop: '0.75rem' }}>{kpi.value}</div>
+                <div className="kpi-meta">
+                  {kpi.meta.map((m) => <span key={m}>{m}</span>)}
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Активность взаимодействия с контрагентами</div>
-            <div style={{ height: 220 }}>
-              <ResponsiveContainer>
-                <AreaChart data={activityTrendData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorNew" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorEx" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="existing" stroke="#3b82f6" fill="url(#colorNew)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="new" stroke="#f59e0b" fill="url(#colorEx)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+          {/* Тренд + типы документов */}
+          <div className="dash-grid dash-grid-main stagger">
+            <div className="dash-card">
+              <div>
+                <div className="dash-card-title" style={{ marginBottom: 0 }}>Загрузки за последние 30 дней</div>
+                <div className="dash-card-caption" style={{ marginBottom: '0.75rem' }}>Документов в день</div>
+              </div>
+              <div style={{ height: 230 }}>
+                {renderEmptyOr(stats.volume_trend, () => (
+                  <AreaChart data={stats.volume_trend} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="volumeGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0a84ff" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#0a84ff" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#f0f0f2" vertical={false} />
+                    <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                    <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <RechartsTooltip content={<ChartTooltip />} />
+                    <Area type="monotone" dataKey="value" name="Документов" stroke="#0a84ff" fill="url(#volumeGrad)" strokeWidth={2.5} />
+                  </AreaChart>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', fontSize: '10px', marginTop: '4px' }}>
-               <span style={{ color: '#3b82f6', fontWeight: 600 }}>— Действующие клиенты</span>
-               <span style={{ color: '#f59e0b', fontWeight: 600 }}>— Новые клиенты</span>
-            </div>
-          </div>
 
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Структура категорий закупок</div>
-            <div style={{ height: 240, position: 'relative' }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={[
-                      { name: 'Услуги', value: 58269 },
-                      { name: 'Оборудование', value: 30630 },
-                      { name: 'Материалы', value: 22594 },
-                      { name: 'Транспорт', value: 22078 },
-                      { name: 'Прочее', value: 9462 },
-                    ]} 
-                    cx="50%" cy="50%" innerRadius={50} outerRadius={80} 
-                    paddingAngle={2} dataKey="value"
-                    labelLine={true}
-                    label={({ name, value }) => `${name}\n${value}`}
-                    stroke="none"
-                  >
-                    {PIE_COLORS.map((color, i) => <Cell key={i} fill={color} />)}
-                  </Pie>
-                  <RechartsTooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* ROW 3: More Charts & Tables */}
-        <div style={dashboardStyles.threeCols}>
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Топ-10 закупаемых позиций</div>
-            <div style={{ height: 280 }}>
-              <ResponsiveContainer>
-                <BarChart layout="vertical" data={topItemsData} margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                  <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#475569' }} axisLine={false} tickLine={false} width={110} />
-                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
-                  <Bar dataKey="value" fill="#60a5fa" radius={[0, 4, 4, 0]} barSize={12} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Распределение по ДО (Регионам)</div>
-            <div style={{ height: 260 }}>
-              <ResponsiveContainer>
-                <BarChart data={regionStatusData} margin={{ top: 20, right: 0, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
-                  <Bar dataKey="Действующие" stackId="a" fill="#3b82f6" barSize={20} />
-                  <Bar dataKey="Новые" stackId="a" fill="#facc15" barSize={20} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', fontSize: '10px', marginTop: '4px' }}>
-               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: 8, height: 8, background: '#3b82f6' }}/> Действующие контрагенты</span>
-               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: 8, height: 8, background: '#facc15' }}/> Новые контрагенты</span>
-            </div>
-          </div>
-
-          <div style={dashboardStyles.chartCard}>
-            <div style={dashboardStyles.chartTitle}><div style={dashboardStyles.titleIcon} /> Последние обработанные документы</div>
-            <div style={dashboardStyles.tableContainer}>
-              <table style={dashboardStyles.table}>
-                <thead>
-                  <tr>
-                    <th style={dashboardStyles.th}>Файл</th>
-                    <th style={dashboardStyles.th}>Тип</th>
-                    <th style={dashboardStyles.th}>Инициатор</th>
-                    <th style={dashboardStyles.th}>Статус</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.slice(0, 8).map((doc, idx) => (
-                    <tr key={doc.id || idx}>
-                      <td style={{ ...dashboardStyles.td, textAlign: 'left', maxWidth: '100px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={doc.original_filename}>
-                        {doc.original_filename}
-                      </td>
-                      <td style={dashboardStyles.td}>{doc.file_type}</td>
-                      <td style={dashboardStyles.td}>user_{doc.created_by?.split('-')[0] || 'admin'}</td>
-                      <td style={dashboardStyles.td}>
-                        {doc.status === 'processed' ? '100%' : 'В раб.'}
-                      </td>
-                    </tr>
+            <div className="dash-card">
+              <div className="dash-card-title">Типы документов</div>
+              <div style={{ height: 170 }}>
+                {renderEmptyOr(byTypeData, () => (
+                  <PieChart>
+                    <Pie
+                      data={byTypeData}
+                      cx="50%" cy="50%" innerRadius={52} outerRadius={78}
+                      paddingAngle={3} cornerRadius={5} dataKey="value"
+                      stroke="none"
+                    >
+                      {byTypeData.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip content={<ChartTooltip />} />
+                  </PieChart>
+                ))}
+              </div>
+              {byTypeData.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: '0.5rem' }}>
+                  {byTypeData.map((t, i) => (
+                    <span key={t.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.7rem', color: 'var(--color-text-secondary)' }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                      {t.name} · {t.value}
+                    </span>
                   ))}
-                  {/* Fill empty rows if needed */}
-                  {Array.from({ length: Math.max(0, 8 - documents.length) }).map((_, i) => (
-                    <tr key={`empty-${i}`}>
-                      <td style={dashboardStyles.td}>-</td>
-                      <td style={dashboardStyles.td}>-</td>
-                      <td style={dashboardStyles.td}>-</td>
-                      <td style={dashboardStyles.td}>-</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
           </div>
-        </div>
 
-      </div>
+          {/* Месяцы / годы / топ задач */}
+          <div className="dash-grid dash-grid-three stagger">
+            <div className="dash-card">
+              <div className="dash-card-title">Документы по месяцам</div>
+              <div style={{ height: 210 }}>
+                {renderEmptyOr(stats.monthly, () => (
+                  <BarChart data={stats.monthly} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
+                    <CartesianGrid stroke="#f0f0f2" vertical={false} />
+                    <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                    <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <RechartsTooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                    <Bar dataKey="value" name="Документов" fill="#0a84ff" radius={[6, 6, 0, 0]} barSize={18} />
+                  </BarChart>
+                ))}
+              </div>
+            </div>
+
+            <div className="dash-card">
+              <div className="dash-card-title">По годам: всего и обработано</div>
+              <div style={{ height: 190 }}>
+                {renderEmptyOr(stats.yearly, () => (
+                  <BarChart data={stats.yearly} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
+                    <CartesianGrid stroke="#f0f0f2" vertical={false} />
+                    <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                    <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <RechartsTooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                    <Bar dataKey="Всего" fill="#d2d2d7" barSize={16} radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="Обработано" fill="#0a84ff" barSize={16} radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d2d2d7' }} /> Всего
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0a84ff' }} /> Обработано
+                </span>
+              </div>
+            </div>
+
+            <div className="dash-card">
+              <div className="dash-card-title">Топ типов задач</div>
+              <div style={{ height: 210 }}>
+                {renderEmptyOr(stats.top_items, () => (
+                  <BarChart layout="vertical" data={stats.top_items} margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: '#48484a' }} axisLine={false} tickLine={false} width={140} />
+                    <RechartsTooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                    <Bar dataKey="value" name="Запусков" fill="#5e5ce6" radius={[0, 6, 6, 0]} barSize={14} />
+                  </BarChart>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Последние документы */}
+          <BlurFade delay={120}>
+            <div className="dash-card">
+              <div className="dash-card-title">Последние документы</div>
+              {documents.length === 0 ? (
+                <div className="dash-empty">Документов нет</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="dash-table">
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Файл</th>
+                        <th style={{ textAlign: 'left' }}>Тип</th>
+                        <th style={{ textAlign: 'left' }}>Статус</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {documents.slice(0, 8).map((doc) => (
+                        <tr key={doc.id}>
+                          <td
+                            style={{ maxWidth: '380px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}
+                            title={doc.original_filename}
+                          >
+                            {doc.original_filename}
+                          </td>
+                          <td style={{ color: 'var(--color-text-secondary)' }}>
+                            {FILE_TYPE_LABELS[doc.file_type] || doc.file_type}
+                          </td>
+                          <td>
+                            <span className={`status-dot status-${doc.status}`}>
+                              {STATUS_LABELS[doc.status] || doc.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </BlurFade>
+        </>
+      )}
     </div>
   );
 }

@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, extract, case
+from sqlalchemy import select, func, extract, case, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
-from app.models.document import Document, DocumentStatus, FileType
+from app.models.document import Document, DocumentStatus, FileType, ProcessingTask
 from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/analytics", tags=["Аналитика"])
@@ -18,8 +18,6 @@ async def get_summary(
     current_user: User = Depends(get_current_user),
 ):
     """Сводная аналитика по документам текущего пользователя."""
-
-    base = select(Document).where(Document.uploaded_by == current_user.id)
 
     # Total counts by status
     status_query = (
@@ -98,13 +96,73 @@ async def get_summary(
             "Обработано": row.processed,
         })
 
+    # Volume trend — кол-во загрузок по дням за последние 30 дней (для area chart)
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    volume_query = (
+        select(
+            cast(Document.created_at, Date).label("day"),
+            func.count(Document.id).label("cnt"),
+        )
+        .where(
+            Document.uploaded_by == current_user.id,
+            Document.created_at >= thirty_days_ago,
+        )
+        .group_by("day")
+        .order_by("day")
+    )
+    volume_result = await db.execute(volume_query)
+    volume_trend = [
+        {"name": row.day.strftime("%d.%m"), "value": row.cnt}
+        for row in volume_result
+    ]
+
+    # Top items — топ типов задач за всё время (для bar chart)
+    top_query = (
+        select(
+            ProcessingTask.task_type,
+            func.count(ProcessingTask.id).label("cnt"),
+        )
+        .where(ProcessingTask.created_by == current_user.id)
+        .group_by(ProcessingTask.task_type)
+        .order_by(func.count(ProcessingTask.id).desc())
+        .limit(5)
+    )
+    top_result = await db.execute(top_query)
+    task_type_labels = {
+        "xls_fill": "Заполнение ЕИС",
+        "smsp_primary_sumup": "Первичный свод СМСП",
+        "smsp_final_summary": "Итоговый свод СМСП",
+        "manufacturer_search_specs": "Поиск производителей",
+        "manufacturer_search_name": "Поиск по наименованию",
+    }
+    top_items = [
+        {
+            "name": task_type_labels.get(row.task_type, row.task_type or "—"),
+            "value": row.cnt,
+        }
+        for row in top_result
+    ]
+
+    processed = status_counts.get("processed", 0) + status_counts.get("verified", 0)
+    pending = status_counts.get("uploaded", 0) + status_counts.get("processing", 0)
+    errors = status_counts.get("error", 0)
+
+    # KPI — посчитанные на бэке проценты, чтобы фронт не хардкодил.
+    success_rate = round(processed / total * 100, 2) if total else 0.0
+    error_rate = round(errors / total * 100, 2) if total else 0.0
+
     return {
         "total": total,
-        "processed": status_counts.get("processed", 0) + status_counts.get("verified", 0),
-        "pending": status_counts.get("uploaded", 0) + status_counts.get("processing", 0),
-        "errors": status_counts.get("error", 0),
+        "processed": processed,
+        "pending": pending,
+        "errors": errors,
+        "success_rate": success_rate,
+        "error_rate": error_rate,
         "by_status": status_counts,
         "by_type": type_counts,
         "monthly": monthly_data,
         "yearly": yearly_data,
+        "volume_trend": volume_trend,
+        "top_items": top_items,
+        "region_status": [],  # заглушка: реальные регионы появятся когда добавим inn → region маппинг
     }

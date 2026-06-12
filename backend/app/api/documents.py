@@ -11,8 +11,9 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.document import Document, FileType, DocumentStatus, ProcessingTask
-from app.models.notification import Notification, NotificationType
+from app.models.notification import NotificationType
 from app.models.smsp_rules import SmspExclusionRule
+from app.services.notifier import add_notification
 from app.schemas import (
     DocumentResponse,
     DocumentUploadResponse,
@@ -44,6 +45,9 @@ async def upload_document(
     """Загрузка документа."""
     import json
 
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Имя файла не задано")
+
     # Validate file extension
     allowed_extensions = {".pdf", ".xls", ".xlsx"}
     file_ext = Path(file.filename).suffix.lower()
@@ -51,6 +55,14 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Неподдерживаемый формат файла: {file_ext}. Допустимые: {', '.join(allowed_extensions)}",
+        )
+
+    # Реестры Задачи 2 парсятся только из Excel — PDF отклоняем сразу,
+    # иначе ошибка всплыла бы 500-кой на этапе построения свода.
+    if file_type in {FileType.PAYMENT_REGISTRY, FileType.CONTRACT_REGISTRY} and file_ext == ".pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Реестры платежей и договоров принимаются только в форматах XLS/XLSX",
         )
 
     # Create upload directory
@@ -61,8 +73,15 @@ async def upload_document(
     unique_filename = f"{uuid.uuid4().hex}_{file.filename}"
     file_path = upload_dir / unique_filename
 
+    content = await file.read()
+    max_size = 50 * 1024 * 1024  # синхронно с подсказкой в UI и лимитом nginx
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Файл превышает максимальный размер 50 МБ",
+        )
+
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
 
     # Parse metadata
@@ -182,6 +201,7 @@ async def process_documents(
             "comments": request.comments,
             "template_document_id": str(template_doc.id) if template_doc else None,
             "scenario": request.scenario,
+            "use_llm": request.use_llm,
         },
         created_by=current_user.id,
         status=DocumentStatus.PROCESSING,
@@ -194,11 +214,13 @@ async def process_documents(
         positions_data = parse_document(positions_doc.file_path)
         upd_data = parse_document(upd_doc.file_path)
 
-        # Match positions
+        # Match positions (scenario из формы перевешивает file_type, если задан)
         matches = await match_positions(
             positions_data,
             upd_data,
             source_file_type=upd_doc.file_type.value,
+            scenario=request.scenario,
+            use_llm=request.use_llm,
         )
 
         document_number = request.document_number or upd_data.metadata.get("document_number")
@@ -263,14 +285,14 @@ async def process_documents(
             f"Сформирована версия {version}."
         )
 
-        # Create success notification
-        notification = Notification(
+        # Create success notification (best-effort)
+        add_notification(
+            db,
             user_id=current_user.id,
             title="Обработка завершена",
             message=success_msg,
             notification_type=NotificationType.SUCCESS,
         )
-        db.add(notification)
 
         return ProcessingResponse(
             task_id=task.id,
@@ -287,15 +309,18 @@ async def process_documents(
         task.status = DocumentStatus.ERROR
         task.matching_data = {"error": str(e)}
 
-        # Create error notification
-        error_notification = Notification(
+        # Create error notification (best-effort)
+        add_notification(
+            db,
             user_id=current_user.id,
             title="Ошибка обработки",
             message=f"Ошибка при обработке документов: {str(e)}",
             notification_type=NotificationType.ERROR,
         )
-        db.add(error_notification)
 
+        # Коммитим явно: после raise зависимость get_db делает rollback,
+        # и без коммита ERROR-задача с уведомлением не попали бы в БД.
+        await db.commit()
         raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
 
 
@@ -395,7 +420,11 @@ async def build_task2_primary_sumup(
     task = ProcessingTask(
         task_type="smsp_primary_sumup",
         source_document_ids=[str(payment_doc.id), str(contract_doc.id)],
-        parameters={},
+        parameters={
+            "date_from": request.date_from.isoformat() if request.date_from else None,
+            "date_to": request.date_to.isoformat() if request.date_to else None,
+            "min_amount": request.min_amount,
+        },
         created_by=current_user.id,
         status=DocumentStatus.PROCESSING,
     )
@@ -405,7 +434,14 @@ async def build_task2_primary_sumup(
     try:
         payments = parse_payment_registry(payment_doc.file_path)
         contracts = parse_contract_registry(contract_doc.file_path)
-        sumup_rows = build_primary_sumup(payments, contracts, rules)
+        sumup_rows = build_primary_sumup(
+            payments,
+            contracts,
+            rules,
+            date_from=request.date_from,
+            date_to=request.date_to,
+            min_amount=request.min_amount,
+        )
 
         out_path = generate_primary_sumup_xlsx(sumup_rows, str(task.id))
 
@@ -438,13 +474,13 @@ async def build_task2_primary_sumup(
             f"{sum(1 for r in sumup_rows if r.has_contract_match)} сопоставлено с реестром договоров."
         )
 
-        notification = Notification(
+        add_notification(
+            db,
             user_id=current_user.id,
             title="Первичный свод построен",
             message=msg,
             notification_type=NotificationType.SUCCESS,
         )
-        db.add(notification)
 
         return PrimarySumupResponse(
             task_id=task.id,
@@ -458,6 +494,8 @@ async def build_task2_primary_sumup(
     except Exception as e:
         task.status = DocumentStatus.ERROR
         task.matching_data = {"error": str(e)}
+        # Явный коммит — иначе get_db откатит ERROR-статус задачи (см. /process).
+        await db.commit()
         raise HTTPException(status_code=500, detail=f"Ошибка построения первичного свода: {str(e)}")
 
 
@@ -591,8 +629,13 @@ async def build_task2_final_summary(
             has_contract_match=d.get("has_contract_match", False),
         ))
 
-    out_path = generate_final_summary_xlsx(sumup_rows, str(doc.id))
-    preview = compute_final_summary(sumup_rows)
+    try:
+        out_path = generate_final_summary_xlsx(sumup_rows, str(doc.id))
+        preview = compute_final_summary(sumup_rows)
+    except Exception as e:
+        # Единообразно с /process и /task2/primary-sumup: русскоязычный detail
+        # вместо голого Internal Server Error.
+        raise HTTPException(status_code=500, detail=f"Ошибка построения итогового свода: {str(e)}")
 
     report_doc = Document(
         filename=Path(out_path).name,
@@ -619,13 +662,13 @@ async def build_task2_final_summary(
     )
     db.add(final_task)
 
-    notification = Notification(
+    add_notification(
+        db,
         user_id=current_user.id,
         title="Итоговый свод СМСП готов",
         message=f"Сформирован файл «Второй свод_обобщение.xlsx» ({len(sumup_rows)} строк в источнике).",
         notification_type=NotificationType.SUCCESS,
     )
-    db.add(notification)
 
     sheets_dto = {
         name: [FinalSummaryMetric(**m) for m in metrics]

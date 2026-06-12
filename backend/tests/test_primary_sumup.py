@@ -144,6 +144,67 @@ class TestClassification:
         assert rows[0].is_continuing == "да"
 
 
+class TestPeriodFilter:
+    """E2: фильтр по периоду расчёта."""
+
+    def test_date_from_drops_earlier_payments(self, rules):
+        payments = [
+            _payment(contract_number="A", payment_date=date(2025, 12, 1), payment_sum=1000),
+            _payment(contract_number="A", payment_date=date(2026, 1, 15), payment_sum=2000),
+            _payment(contract_number="A", payment_date=date(2026, 6, 1), payment_sum=3000),
+        ]
+        rows = build_primary_sumup(payments, [], rules, date_from=date(2026, 1, 1))
+        assert len(rows) == 1
+        assert rows[0].payment_sum == 5000.0
+
+    def test_date_to_drops_later_payments(self, rules):
+        payments = [
+            _payment(contract_number="A", payment_date=date(2026, 1, 1), payment_sum=1000),
+            _payment(contract_number="A", payment_date=date(2026, 6, 1), payment_sum=2000),
+            _payment(contract_number="A", payment_date=date(2027, 1, 1), payment_sum=3000),
+        ]
+        rows = build_primary_sumup(payments, [], rules, date_to=date(2026, 12, 31))
+        assert rows[0].payment_sum == 3000.0
+
+    def test_date_range_filters_both_ends(self, rules):
+        payments = [
+            _payment(contract_number="A", payment_date=date(2025, 6, 1), payment_sum=1000),
+            _payment(contract_number="A", payment_date=date(2026, 3, 15), payment_sum=2000),
+            _payment(contract_number="A", payment_date=date(2027, 6, 1), payment_sum=3000),
+        ]
+        rows = build_primary_sumup(
+            payments, [], rules,
+            date_from=date(2026, 1, 1), date_to=date(2026, 12, 31),
+        )
+        assert rows[0].payment_sum == 2000.0
+
+    def test_payments_without_date_dropped_when_filter_active(self, rules):
+        payments = [
+            _payment(contract_number="A", payment_date=None, payment_sum=999),
+            _payment(contract_number="A", payment_date=date(2026, 6, 1), payment_sum=1000),
+        ]
+        rows = build_primary_sumup(payments, [], rules, date_from=date(2026, 1, 1))
+        assert rows[0].payment_sum == 1000.0
+
+
+class TestMinAmountFilter:
+    """E3: пороговое значение по сумме платежей."""
+
+    def test_groups_below_threshold_dropped(self, rules):
+        payments = [
+            _payment(contract_number="A", payment_sum=500),
+            _payment(contract_number="B", payment_sum=5000),
+        ]
+        rows = build_primary_sumup(payments, [], rules, min_amount=1000)
+        assert len(rows) == 1
+        assert rows[0].contract_number == "B"
+
+    def test_threshold_zero_disabled(self, rules):
+        payments = [_payment(contract_number="A", payment_sum=10)]
+        rows = build_primary_sumup(payments, [], rules, min_amount=0)
+        assert len(rows) == 1
+
+
 class TestSumupRowSerialization:
     def test_to_dict_dates_iso(self):
         row = SumupRow(

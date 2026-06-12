@@ -156,6 +156,35 @@ class TestSheetFilters:
         assert not_pub["total_sum"] == pytest.approx(945_000)
 
 
+class TestSmspShare:
+    """E1: расчёт долей СМСП по сумме и по количеству."""
+
+    def test_share_by_sum_present(self, sample_rows):
+        sheet = result_sheet(sample_rows, "Итого_платежи_договоры")
+        share_sum = _find(sheet, "Доля СМСП по сумме, %")
+        # Числитель = «Итого с СМСП (за минусом исключений)» = только_СМСП + с_СМСП_за_исключениями
+        # = 9_000_000 + 300_000 = 9_300_000
+        # Знаменатель = «Итого за минусом исключений» = 10_775_000 - 1_330_000 = 9_445_000
+        # Доля = 9_300_000 / 9_445_000 * 100 ≈ 98.46
+        assert share_sum["total_sum"] == pytest.approx(98.46, abs=0.05)
+
+    def test_share_by_count_present(self, sample_rows):
+        sheet = result_sheet(sample_rows, "Итого_платежи_договоры")
+        share_count = _find(sheet, "Доля СМСП по количеству, %")
+        # СМСП-договоров после исключений: 4 (две покупки только для СМСП + Страх/Образ → нет, т.к.
+        # они в категориях исключений; С СМСП малое — да, smsp_purchase=нет but smsp_type=Микро and excl=нет → да; Обычный и не публ — нет, smsp_type=нет)
+        # smsp_eligible: СМСП среднее, СМСП малое, С СМСП малое = 3
+        # Всего минус исключений: 8 - 3 (аренда/страх/образов) = 5
+        # 3/5 * 100 = 60.0
+        assert share_count["total_sum"] == pytest.approx(60.0, abs=0.05)
+
+    def test_shares_zero_on_empty_input(self):
+        result = compute_final_summary([])
+        for sheet_name in result:
+            share = _find(result[sheet_name], "Доля СМСП по сумме, %")
+            assert share["total_sum"] == 0.0
+
+
 class TestXlsxGeneration:
     def test_3_sheets_are_written(self, tmp_path, sample_rows, monkeypatch):
         from app.config import settings

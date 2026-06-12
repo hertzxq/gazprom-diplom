@@ -1,0 +1,29 @@
+@startuml fig_2_6_navigation
+' Рисунок 2.6 — Карта переходов интерфейса
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 160
+skinparam defaultFontSize 13
+
+state "LoginPage\nСтраница входа" as login
+state "ManufacturerSearchPage\nПоиск производителей" as manuf
+state "UploadPage\nЗагрузка документов" as upload
+state "ProcessingPage\nЗадача 1: автозаполнение XLS ЕИС" as proc
+state "Task2Page\nЗадача 2: реестры и расчёт СМСП" as task2
+state "AdminPage\nАдминистрирование" as admin
+
+[*] --> login : нет JWT-токена
+[*] --> manuf : валидный JWT\nв localStorage
+login --> manuf : успешный вход
+
+manuf --> upload : sidebar
+manuf --> proc : sidebar
+manuf --> task2 : sidebar
+manuf --> admin : sidebar\n(только role = admin)
+
+upload --> proc : файлы загружены,\nзапуск обработки
+proc --> proc : скачивание\nрезультата
+
+admin --> login : выход (logout)
+manuf --> login : 401 / истёкший токен
+@enduml
